@@ -278,6 +278,24 @@ export default function NewApplicationPage() {
   // the report flags fabricatedAdded terms. Reset on every fresh tailor result (below) so an
   // acknowledgement never silently carries over onto a different draft's fabricated terms.
   const [fabricationAck, setFabricationAck] = useState(false);
+  // mirrors the server's scrape/tailor/approve progress into the DevTools console, live. Dev only:
+  // this exists to make the ~70s tailoring call legible while it runs, not to ship to users.
+  // Failures are deliberately silent -- a missing log stream must never disturb the actual flow.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+
+    const source = new EventSource("/api/logs");
+    source.onmessage = (event) => {
+      try {
+        console.log(JSON.parse(event.data));
+      } catch {
+        console.log(event.data);
+      }
+    };
+
+    return () => source.close();
+  }, []);
+
   // guards against setState-via-dispatch after unmount (e.g. user navigates to "/" mid-request) --
   // the fetch itself isn't cancelled, but its result is discarded rather than dispatched.
   //

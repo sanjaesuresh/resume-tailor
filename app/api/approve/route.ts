@@ -8,6 +8,7 @@ import {
   usingSampleResume,
   usingSampleWhitelist,
 } from "@/lib/config";
+import { formatCount, logger, startTimer, withHeartbeat } from "@/lib/log";
 import { getProvider, type ClaudeProvider } from "@/lib/provider";
 import { validateTailored, type Violation } from "@/lib/validator";
 
@@ -96,22 +97,31 @@ export type ApproveResponse =
  */
 export async function approve(payload: ApprovePayload, deps: ApproveDeps = {}): Promise<ApproveResponse> {
   const { tex, company, role, url, report } = payload;
+  const log = logger("approve");
+  const elapsed = startTimer();
+  log(`compiling ${formatCount(tex.length)} chars with tectonic…`);
 
   let fixedTex = tex;
   // compileWithAutoFix only returns ok/log, not the tex that produced it -- capture the fixer's
   // output via closure so, on success, we can re-validate (and, if clean, persist) the tex that
   // actually compiled
-  const { result, usedFix } = await compileWithAutoFix(tex, async (currentTex, log) => {
+  // param renamed off `log` so it doesn't shadow the progress logger above
+  const { result, usedFix } = await compileWithAutoFix(tex, async (currentTex, compileLog) => {
     // built lazily -- only reached if the first compile attempt actually failed, so a resume that
     // compiles cleanly on the first try never needs an API key or a logged-in CLI
+    log(`✗ compile failed · asking claude for a fix…`);
     const fix = createFixFn(deps.provider ?? getProvider());
-    fixedTex = await fix(currentTex, log);
+    fixedTex = await withHeartbeat(log, () => fix(currentTex, compileLog));
+    log(`fix returned ${formatCount(fixedTex.length)} chars · recompiling…`);
     return fixedTex;
   });
 
   if (!result.ok) {
+    log(`✗ compilation failed · ${elapsed()}`);
     return { status: 422, body: { error: "Compilation failed", log: result.log } };
   }
+
+  log(`✓ compiled · ${formatCount(result.pdf.length)} bytes · ${elapsed()}${usedFix ? " (auto-fixed)" : ""}`);
 
   let finalReport: Record<string, unknown> = report;
 
@@ -126,6 +136,12 @@ export async function approve(payload: ApprovePayload, deps: ApproveDeps = {}): 
     const isNewViolation = (v: Violation) =>
       !approvedViolations.some((a) => a.rule === v.rule && a.message === v.message);
     const newViolations = fixedViolations.filter(isNewViolation);
+
+    log(
+      newViolations.length > 0
+        ? `✗ auto-fix introduced ${newViolations.length} new violation(s) · not saved`
+        : `auto-fix re-validated clean against the approved draft`
+    );
 
     if (newViolations.length > 0) {
       // never persist or hand back a download for a fixer output that fabricated or shrank
@@ -160,6 +176,7 @@ export async function approve(payload: ApprovePayload, deps: ApproveDeps = {}): 
     now: deps.now,
   };
   const application = persistApplication(persistInput);
+  log(`✓ saved #${application.id} · ${application.company} / ${application.role} · ${elapsed()} total`);
 
   return {
     status: 200,

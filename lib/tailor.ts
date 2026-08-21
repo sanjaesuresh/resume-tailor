@@ -1,6 +1,7 @@
 import fs from "fs";
 import { z } from "zod";
-import { BASE_RESUME_PATH, WHITELIST_PATH } from "./config";
+import { BASE_RESUME_PATH, MODEL, PROVIDER, WHITELIST_PATH } from "./config";
+import { formatCount, logger, startTimer, withHeartbeat } from "./log";
 import { getProvider, type ClaudeProvider } from "./provider";
 import { validateTailored, type Rule } from "./validator";
 import { buildReport, type AtsReport } from "./ats";
@@ -143,6 +144,16 @@ function buildRetryUserMessage(
   return parts.join("\n\n");
 }
 
+// "removed-line x2, bullet-too-long" -- the rules that fired, deduped with counts, so the terminal
+// says what went wrong without printing every message body
+function summarizeRules(violations: TailorViolation[]): string {
+  const counts = new Map<string, number>();
+  for (const v of violations) counts.set(v.rule, (counts.get(v.rule) ?? 0) + 1);
+  return [...counts]
+    .map(([rule, count]) => (count > 1 ? `${rule} x${count}` : rule))
+    .join(", ");
+}
+
 /**
  * Sends the base resume + job description to Claude, validates the result against the
  * code-enforced rules (Task 4), and retries (feeding back the specific violations) up to
@@ -153,6 +164,7 @@ export async function tailorResume(
   jobDescription: string,
   opts: TailorOptions = {}
 ): Promise<TailorResult> {
+  const log = logger("tailor");
   const baseTex = opts.baseTex ?? fs.readFileSync(BASE_RESUME_PATH, "utf-8");
   const whitelist = opts.whitelist ?? parseWhitelist(fs.readFileSync(WHITELIST_PATH, "utf-8"));
   // built lazily, and only when the caller didn't inject a fake, so tests never touch the
@@ -171,13 +183,23 @@ export async function tailorResume(
   let violations: TailorViolation[] = [];
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    parsed = await provider({
-      system: SYSTEM_PROMPT,
-      user: userMessage,
-      schema: TailoredResumeSchema,
-    });
+    log(
+      `attempt ${attempt + 1}/${MAX_RETRIES + 1} · prompt ${formatCount(userMessage.length)} chars`
+    );
+    log(`calling claude · ${PROVIDER} · ${MODEL}`);
+
+    const elapsed = startTimer();
+    // the CLI call runs over a minute; without a heartbeat the terminal looks hung
+    parsed = await withHeartbeat(log, () =>
+      provider({
+        system: SYSTEM_PROMPT,
+        user: userMessage,
+        schema: TailoredResumeSchema,
+      })
+    );
 
     if (!parsed) {
+      log(`✗ ${elapsed()} · response did not match the required structure`);
       // structured parse failed -- nothing to validate (there's no tex at all), so this is
       // reported under its own tag rather than "removed-line" (which specifically means a
       // section/bullet count shrank); treat like any other failed attempt and let the retry loop
@@ -202,9 +224,19 @@ export async function tailorResume(
       continue;
     }
 
+    log(
+      `✓ ${elapsed()} · ${formatCount(parsed.tex.length)} chars · ${parsed.company} / ${parsed.role}`
+    );
+
     violations = validateTailored(baseTex, parsed.tex, whitelist);
+    log(
+      violations.length === 0
+        ? `validator: clean`
+        : `validator: ${violations.length} violation(s) · ${summarizeRules(violations)}`
+    );
     if (violations.length === 0 || attempt >= MAX_RETRIES) break;
 
+    log(`retrying with the violations fed back`);
     userMessage = buildRetryUserMessage(
       baseTex,
       whitelist,
@@ -223,6 +255,12 @@ export async function tailorResume(
   }
 
   const report = buildReport(jobDescription, baseTex, parsed.tex, whitelist);
+  log(
+    `ATS ${report.scoreBefore} → ${report.scoreAfter} · ${report.matchedAfter.length}/${report.keywords.length} keywords matched` +
+      (report.fabricatedAdded.length > 0
+        ? ` · ${report.fabricatedAdded.length} possible fabrication(s) flagged`
+        : "")
+  );
 
   return {
     tex: parsed.tex,

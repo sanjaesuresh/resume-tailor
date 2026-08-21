@@ -1,3 +1,5 @@
+import { formatCount, logger, startTimer } from "./log";
+
 // minimum plain-text length before we trust an extraction; shorter results are usually
 // nav-only skeletons or JS-rendered shells, so callers treat them as extraction failure
 const MIN_DESCRIPTION_LENGTH = 200;
@@ -159,6 +161,15 @@ export function extractJobPostingJsonLd(html: string): string {
   return best;
 }
 
+// which path produced the text -- reported in the dev-console progress output, since "json-ld vs
+// container" is the single most useful fact when a given board extracts badly
+export type ExtractionStrategy = "json-ld" | "container" | "none";
+
+export interface Extraction {
+  text: string;
+  strategy: ExtractionStrategy;
+}
+
 /**
  * Given raw HTML, prefers a published schema.org JobPosting; failing that, strips known noise tags
  * (script/style/nav/header/footer/noscript), then finds the densest candidate container
@@ -168,10 +179,14 @@ export function extractJobPostingJsonLd(html: string): string {
  * treat that as extraction failure and fall back to a manual paste box.
  */
 export function extractDescription(html: string): string {
+  return extractDescriptionWithStrategy(html).text;
+}
+
+export function extractDescriptionWithStrategy(html: string): Extraction {
   // structured data first, and against the raw html: the noise-tag pass below strips <script>
   // contents wholesale, which would take the linked data with it
   const fromJsonLd = extractJobPostingJsonLd(html);
-  if (fromJsonLd.length >= MIN_DESCRIPTION_LENGTH) return fromJsonLd;
+  if (fromJsonLd.length >= MIN_DESCRIPTION_LENGTH) return { text: fromJsonLd, strategy: "json-ld" };
 
   // comments are invisible to a real reader but still just text to our tag-stripping regexes,
   // so drop them before anything else or commented-out markup gets scored as content
@@ -214,7 +229,9 @@ export function extractDescription(html: string): string {
     best = tagsToText(cleaned);
   }
 
-  return best.length >= MIN_DESCRIPTION_LENGTH ? best : "";
+  return best.length >= MIN_DESCRIPTION_LENGTH
+    ? { text: best, strategy: "container" }
+    : { text: "", strategy: "none" };
 }
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -275,22 +292,29 @@ function isBlockedHost(hostname: string): boolean {
  * can fall back to a manual paste box.
  */
 export async function scrapeJob(url: string): Promise<ScrapeResult> {
+  const log = logger("scrape");
+
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
+    log(`✗ invalid URL`);
     return { ok: false, error: "Invalid URL" };
   }
 
   if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
+    log(`✗ refused scheme ${parsed.protocol}`);
     return { ok: false, error: `Unsupported URL scheme "${parsed.protocol}" -- only http/https URLs can be fetched` };
   }
   if (isBlockedHost(parsed.hostname)) {
+    log(`✗ refused private/loopback host ${parsed.hostname}`);
     return { ok: false, error: "This URL points to a private, loopback, or link-local address and cannot be fetched" };
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const elapsed = startTimer();
+  log(`GET ${parsed.hostname}${parsed.pathname}`);
 
   try {
     const response = await fetch(url, {
@@ -299,6 +323,7 @@ export async function scrapeJob(url: string): Promise<ScrapeResult> {
     });
 
     if (!response.ok) {
+      log(`✗ ${response.status} · ${elapsed()}`);
       return { ok: false, error: `Failed to fetch job posting: received status ${response.status}` };
     }
 
@@ -307,17 +332,24 @@ export async function scrapeJob(url: string): Promise<ScrapeResult> {
     // past the 15s budget, and any error thrown here would escape uncaught, bypassing the
     // { ok: false, error } contract callers rely on
     const html = await response.text();
-    const description = extractDescription(html);
+    log(`${response.status} · ${formatCount(html.length)} bytes · ${elapsed()}`);
+
+    const { text: description, strategy } = extractDescriptionWithStrategy(html);
 
     if (!description) {
+      // names the strategy that came up empty, so a board that extracts badly can be diagnosed
+      // from the terminal without re-fetching the page by hand
+      log(`✗ no description found (json-ld absent, container text under the ${MIN_DESCRIPTION_LENGTH}-char floor)`);
       return { ok: false, error: "Could not extract a job description from this page" };
     }
 
+    log(`strategy=${strategy} · ✓ ${formatCount(description.length)} chars`);
     return { ok: true, description };
   } catch (err) {
     // covers network failures, the AbortController firing on timeout (whether during the
     // fetch or the body read), and any error thrown while reading the response body
     const reason = err instanceof Error && err.name === "AbortError" ? "request timed out" : "network error";
+    log(`✗ ${reason} · ${elapsed()}`);
     return { ok: false, error: `Failed to fetch job posting: ${reason}` };
   } finally {
     clearTimeout(timeout);
