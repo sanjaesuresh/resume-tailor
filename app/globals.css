@@ -2,11 +2,17 @@
   --background: #ffffff;
   --foreground: #171717;
 
-  /* Task 9 (new-application flow) design tokens -- "ink & paper": a warm off-white surface with
-     near-black ink text and a deep rust accent, chosen deliberately over the default
-     blue/indigo-on-white SaaS look. Diff add/remove and warning colors are the one place a
-     conventional data-viz meaning (green=added, red=removed, amber=warning) is kept on purpose --
-     that's an expected, functional convention here, not a decorative default. */
+  /* "ink & paper": a warm off-white surface with near-black ink text and a deep rust accent,
+     chosen deliberately over the default blue/indigo-on-white SaaS look -- this is a résumé
+     tool, so the palette reads as a typeset document rather than a dashboard. Diff add/remove
+     and warning colors are the one place a conventional data-viz meaning (green=added,
+     red=removed, amber=warning) is kept on purpose -- an expected, functional convention here,
+     not a decorative default.
+
+     Elevation ladder (both themes): --na-paper (page background) < --na-neutral-bg (recessed /
+     grouped panels, e.g. the step index, quiet boxes) < --na-paper-raised (cards, inputs,
+     anything meant to read as "on top"). Applied site-wide, including the tracker, so both
+     pages of the app share one visual language instead of two. */
   --na-paper: #faf7f2;
   --na-paper-raised: #ffffff;
   --na-ink: #1c1b1a;
@@ -22,6 +28,14 @@
   --na-warn: #6b3d05;
   --na-warn-bg: #fbe9c8;
   --na-neutral-bg: #efeae1;
+
+  /* type scale: headings use --font-serif (Source Serif 4, an editorial document face) at three
+     sizes; everything else stays on the sans/mono faces already in use. A named scale (rather
+     than ad hoc px per element) is what keeps the heading/body contrast consistent as it's
+     reused across the tracker, the wizard, and every card component. */
+  --na-fs-heading-lg: 32px;
+  --na-fs-heading-md: 20px;
+  --na-fs-heading-sm: 17px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -61,9 +75,12 @@ body {
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--na-ink, var(--foreground));
+  background: var(--na-paper, var(--background));
+  /* every page in the app now shares one font decision -- previously only .na-root and the nav
+     opted into Geist and everything else (the whole tracker page) silently fell back to plain
+     Arial, an undecided default rather than a chosen one */
+  font-family: var(--font-geist-sans, Arial, Helvetica, sans-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -93,7 +110,18 @@ a {
   outline-offset: 2px;
 }
 
-/* ---- shared nav (layout.tsx) ------------------------------------------------------------- */
+/* respect the user's motion preference for every animation this file defines (the step
+   indicator's connector and the tailoring progress bar) -- default state below is always
+   static; motion is opt-in via the no-preference query, never the other way around */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---- shared nav (app/components/SiteNav.tsx) --------------------------------------------- */
 
 .site-nav {
   border-bottom: 1px solid var(--na-rule, #ddd6cb);
@@ -103,7 +131,7 @@ a {
 .site-nav nav {
   display: flex;
   gap: 24px;
-  max-width: 900px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 16px 24px;
   font-family: var(--font-geist-sans, Arial, Helvetica, sans-serif);
@@ -111,13 +139,23 @@ a {
   font-weight: 600;
 }
 
-.site-nav a {
-  color: var(--na-ink, #1c1b1a);
+.site-nav-link {
+  color: var(--na-ink-muted, #6b6660);
   padding: 4px 2px;
   border-bottom: 2px solid transparent;
 }
 
-.site-nav a:hover {
+@media (hover: hover) and (pointer: fine) {
+  .site-nav-link:hover {
+    color: var(--na-ink, #1c1b1a);
+    border-bottom-color: var(--na-rule, #ddd6cb);
+  }
+}
+
+/* current-page indicator: previously no link ever showed which page you were on beyond the URL
+   bar (only :hover had any state at all) */
+.site-nav-link--current {
+  color: var(--na-ink, #1c1b1a);
   border-bottom-color: var(--na-accent, #7c2d12);
 }
 
@@ -134,20 +172,39 @@ a {
   background: var(--na-paper, #faf7f2);
 }
 
+/* Step index: numbered, editorial "table of contents" treatment rather than a bare underline
+   row -- the previous version only distinguished "current" from "done" by text color, with both
+   sharing the exact same border color, so at a glance the two states read as one. Current now
+   gets a filled background tint plus a heavier rule; done keeps the quieter underline-only
+   treatment (it's behind you); upcoming stays fully muted. */
 .na-steps {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   list-style: none;
-  margin-bottom: 32px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--na-ink-muted, #6b6660);
+  margin-bottom: 36px;
 }
 
 .na-step {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   flex: 1;
-  padding-bottom: 8px;
+  padding: 10px 10px 9px 2px;
   border-bottom: 3px solid var(--na-rule, #ddd6cb);
+  color: var(--na-ink-muted, #6b6660);
+}
+
+.na-step-index {
+  font-family: var(--font-geist-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  opacity: 0.7;
+}
+
+.na-step-label {
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .na-step--done {
@@ -157,7 +214,10 @@ a {
 
 .na-step--current {
   color: var(--na-accent, #7c2d12);
-  border-bottom-color: var(--na-accent, #7c2d12);
+  background: var(--na-neutral-bg, #efeae1);
+  border-bottom: 4px solid var(--na-accent, #7c2d12);
+  border-radius: 4px 4px 0 0;
+  margin-bottom: -1px;
 }
 
 .na-section {
@@ -167,14 +227,26 @@ a {
 }
 
 .na-heading {
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: -0.4px;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--na-fs-heading-lg);
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  line-height: 1.2;
 }
 
 /* focusable via tabIndex={-1} for post-transition focus management, not part of tab order */
 .na-heading:focus-visible {
   outline: none;
+}
+
+/* small uppercase section label used to chunk the review step into scannable groups (details /
+   decision) without adding another card -- purely a typographic grouping device */
+.na-eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--na-ink-muted, #6b6660);
 }
 
 .na-field {
@@ -328,9 +400,50 @@ a {
   word-break: break-word;
 }
 
+/* progress state for the ~60-100s tailoring wait: text note (announced via the caller's
+   role="status") plus a slim, decorative progress track. The sweep animation is neutralized by
+   the site-wide prefers-reduced-motion override above, so a reduced-motion user sees a static
+   filled bar instead of movement. */
+.na-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .na-progress-note {
   font-size: 14px;
   color: var(--na-ink-muted, #6b6660);
+}
+
+.na-progress-track {
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--na-neutral-bg, #efeae1);
+}
+
+.na-progress-bar {
+  position: absolute;
+  inset: 0;
+  width: 35%;
+  border-radius: inherit;
+  background: var(--na-accent, #7c2d12);
+}
+
+.na-progress-bar {
+  animation: na-progress-sweep 1.7s ease-in-out infinite;
+}
+
+@keyframes na-progress-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(285%);
+  }
 }
 
 .na-paste-box {
@@ -345,6 +458,42 @@ a {
   border: 1px solid var(--na-rule, #ddd6cb);
   border-radius: 6px;
   background: var(--na-paper-raised, #fff);
+}
+
+/* wraps the approve/regenerate row + fabrication acknowledgement: a visible seam (top rule,
+   breathing room) between "you're reviewing content" above and "you're now deciding" below --
+   the review step previously had no grouping at all, so the single most consequential action on
+   the page (Approve & compile) carried the same visual weight as every other row on the screen */
+.na-decision {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 20px;
+  border-top: 1px solid var(--na-rule, #ddd6cb);
+}
+
+.na-fabrication-ack {
+  padding: 14px 16px;
+  border-radius: 4px;
+  background: var(--na-warn-bg, #fbe9c8);
+}
+
+.na-fabrication-ack label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--na-warn, #6b3d05);
+}
+
+.na-fabrication-ack input[type="checkbox"] {
+  margin-top: 3px;
+  flex: none;
+  /* default checkbox is 13px, well under the 24px minimum target size -- scale it up rather
+     than leave the label text as the only clickable area */
+  width: 18px;
+  height: 18px;
 }
 
 .na-done-summary {
@@ -365,8 +514,9 @@ a {
 }
 
 .rc-heading {
-  font-size: 18px;
-  font-weight: 700;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--na-fs-heading-md);
+  font-weight: 600;
 }
 
 .rc-subheading {
@@ -411,6 +561,33 @@ a {
 
 .rc-violation-rule {
   font-weight: 700;
+}
+
+/* the single highest-stakes state in the app: a term the model added that isn't verifiable
+   against the base résumé or the skills whitelist. Styled harder than .rc-violations (a routine,
+   fixable formatting warning) via a solid border and a dedicated chip treatment, and now driven
+   by the --na-danger tokens instead of a hardcoded hex pair -- the previous inline styles
+   (#fdecea/#b3261e/#611a15) never adapted for dark mode. */
+.rc-fabrication-warning {
+  padding: 14px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--na-danger, #a3241a);
+  background: var(--na-danger-bg, #fbe2df);
+  color: var(--na-danger, #a3241a);
+}
+
+.rc-fabrication-warning-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.rc-fabrication-warning-body {
+  margin-bottom: 10px;
+}
+
+.rc-chip--fabricated {
+  background: var(--na-danger, #a3241a);
+  color: #fff;
 }
 
 .rc-scores {
@@ -488,8 +665,9 @@ a {
 }
 
 .dv-heading {
-  font-size: 18px;
-  font-weight: 700;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--na-fs-heading-md);
+  font-weight: 600;
 }
 
 .dv-legend {
@@ -586,8 +764,9 @@ a {
 
 .pp-frame {
   width: 100%;
-  /* tall enough to read a page of résumé without scrolling the viewer inside the page */
-  height: 720px;
+  /* tall enough to read a page of résumé without scrolling the viewer inside the page, but
+     capped to the viewport so it doesn't run off-screen on a shorter laptop window */
+  height: clamp(420px, 75vh, 720px);
   border: 1px solid var(--na-rule, #ddd6cb);
   border-radius: 6px;
   background: var(--na-paper-raised, #fff);
@@ -597,4 +776,218 @@ a {
   padding: 24px 0;
   color: var(--na-ink-muted, #6b6660);
   font-size: 14px;
+}
+
+/* ---- Tracker (app/page.tsx) ---------------------------------------------------------------
+   Previously this page was styled entirely with inline style objects using the generic Next.js
+   scaffold tokens (--background/--foreground, i.e. plain white/black) and one-off hex colors,
+   never touching the ink & paper system at all -- the two pages of a two-page app looked like
+   they belonged to different products. This section brings the tracker onto the same tokens,
+   type scale, and component conventions (tr- prefix, matching na-/rc-/dv-/pp-) as the rest of
+   the app. app/page.module.css (the unused create-next-app scaffold file) is removed. */
+
+.tr-root {
+  flex: 1;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  color: var(--na-ink, #1c1b1a);
+  background: var(--na-paper, #faf7f2);
+}
+
+.tr-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.tr-title {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--na-fs-heading-lg);
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
+.tr-empty,
+.tr-loading {
+  font-size: 14px;
+  color: var(--na-ink-muted, #6b6660);
+}
+
+.tr-empty {
+  padding: 32px 24px;
+  border: 1px dashed var(--na-rule, #ddd6cb);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.tr-empty a {
+  font-weight: 600;
+  color: var(--na-accent, #7c2d12);
+  text-decoration: underline;
+}
+
+.tr-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  border-radius: 4px;
+  background: var(--na-danger-bg, #fbe2df);
+  color: var(--na-danger, #a3241a);
+  font-size: 14px;
+}
+
+.tr-retry-btn {
+  flex: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tr-retry-btn:hover {
+    background: color-mix(in srgb, currentColor 12%, transparent);
+  }
+}
+
+/* loading skeleton: a handful of muted placeholder rows rather than a bare "Loading…" string --
+   shape-matches the table it's about to become so layout doesn't jump on load. The shimmer only
+   runs under prefers-reduced-motion: no-preference (see the reduced-motion override above,
+   which forces every animation-duration to ~0 regardless). */
+.tr-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tr-skeleton-row {
+  height: 40px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--na-neutral-bg, #efeae1) 25%,
+    var(--na-paper-raised, #fff) 50%,
+    var(--na-neutral-bg, #efeae1) 75%
+  );
+  background-size: 200% 100%;
+  animation: tr-skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes tr-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.tr-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--na-rule, #ddd6cb);
+  border-radius: 6px;
+}
+
+.tr-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+
+.tr-table th {
+  text-align: left;
+  padding: 10px 14px;
+  white-space: nowrap;
+  background: var(--na-neutral-bg, #efeae1);
+  color: var(--na-ink-muted, #6b6660);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--na-rule, #ddd6cb);
+}
+
+.tr-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--na-rule, #ddd6cb);
+  vertical-align: top;
+}
+
+.tr-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tr-table tbody tr:hover td {
+    background: var(--na-neutral-bg, #efeae1);
+  }
+}
+
+.tr-table td:first-child {
+  font-weight: 600;
+}
+
+.tr-links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.tr-links a {
+  color: var(--na-accent, #7c2d12);
+  font-weight: 600;
+}
+
+.tr-links a:hover {
+  text-decoration: underline;
+}
+
+.tr-inline-error {
+  color: var(--na-danger, #a3241a);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.tr-notes-field {
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+  min-width: 160px;
+  resize: vertical;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--na-rule, #ddd6cb);
+  background: var(--na-paper-raised, #fff);
+  color: var(--na-ink, #1c1b1a);
+}
+
+.tr-notes-field:disabled {
+  opacity: 0.6;
+}
+
+.tr-select {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--na-rule, #ddd6cb);
+  background: var(--na-paper-raised, #fff);
+  color: var(--na-ink, #1c1b1a);
+}
+
+.tr-select:disabled {
+  opacity: 0.6;
 }

@@ -491,7 +491,10 @@ export default function NewApplicationPage() {
             }`}
             aria-current={i === stageIndex ? "step" : undefined}
           >
-            {step.label}
+            <span className="na-step-index" aria-hidden="true">
+              {String(i + 1).padStart(2, "0")}
+            </span>
+            <span className="na-step-label">{step.label}</span>
           </li>
         ))}
       </ol>
@@ -594,9 +597,14 @@ export default function NewApplicationPage() {
             </p>
           )}
           {state.tailorLoading && (
-            <p className="na-progress-note" role="status">
-              Tailoring your resume — this usually takes 30–60 seconds…
-            </p>
+            <div className="na-progress">
+              <p className="na-progress-note" role="status">
+                Tailoring your resume — this usually takes 60–100 seconds…
+              </p>
+              <div className="na-progress-track" aria-hidden="true">
+                <div className="na-progress-bar" />
+              </div>
+            </div>
           )}
 
           <div className="na-actions">
@@ -626,6 +634,7 @@ export default function NewApplicationPage() {
             Review before you apply
           </h1>
 
+          <p className="na-eyebrow">Application details</p>
           <div className="na-review-fields">
             <div className="na-field">
               <label htmlFor="company">Company</label>
@@ -728,46 +737,59 @@ export default function NewApplicationPage() {
             </p>
           )}
           {state.tailorLoading && (
-            <p className="na-progress-note" role="status">
-              Re-tailoring your resume — this usually takes 30–60 seconds…
-            </p>
-          )}
-
-          {state.report.fabricatedAdded.length > 0 && (
-            // B2 fabrication gate: Approve stays disabled until this is checked, so a possible
-            // fabricated skill can never reach compile/PDF without the user actively confirming
-            // they've reviewed it (ReportCard renders the terms themselves as a hard warning above)
-            <div className="na-field na-fabrication-ack">
-              <label htmlFor="fabrication-ack">
-                <input
-                  id="fabrication-ack"
-                  type="checkbox"
-                  checked={fabricationAck}
-                  onChange={(e) => setFabricationAck(e.target.checked)}
-                />{" "}
-                I&apos;ve reviewed the possible fabricated skills flagged above and confirm I can
-                genuinely claim them, or will remove them before approving.
-              </label>
+            <div className="na-progress">
+              <p className="na-progress-note" role="status">
+                Re-tailoring your resume — this usually takes 60–100 seconds…
+              </p>
+              <div className="na-progress-track" aria-hidden="true">
+                <div className="na-progress-bar" />
+              </div>
             </div>
           )}
 
-          <div className="na-actions">
-            <button
-              type="button"
-              className="na-btn na-btn--primary"
-              onClick={handleApprove}
-              disabled={busy || (state.report.fabricatedAdded.length > 0 && !fabricationAck)}
-            >
-              {state.approveLoading ? "Compiling…" : "Approve & compile"}
-            </button>
-            <button
-              type="button"
-              className="na-btn na-btn--secondary"
-              onClick={() => runTailor({})}
-              disabled={busy}
-            >
-              Regenerate
-            </button>
+          {/* visible seam between "reviewing" content above and "deciding" content below --
+              groups the acknowledgement + terminal actions so Approve reads as the page's one
+              consequential action, not just another row in the flow */}
+          <div className="na-decision">
+            <p className="na-eyebrow">Decision</p>
+            {state.report.fabricatedAdded.length > 0 && (
+              // B2 fabrication gate: Approve stays disabled until this is checked, so a possible
+              // fabricated skill can never reach compile/PDF without the user actively confirming
+              // they've reviewed it (ReportCard renders the terms themselves as a hard warning above)
+              <div className="na-field na-fabrication-ack">
+                <label htmlFor="fabrication-ack">
+                  <input
+                    id="fabrication-ack"
+                    type="checkbox"
+                    checked={fabricationAck}
+                    onChange={(e) => setFabricationAck(e.target.checked)}
+                  />
+                  <span>
+                    I&apos;ve reviewed the possible fabricated skills flagged above and confirm I
+                    can genuinely claim them, or will remove them before approving.
+                  </span>
+                </label>
+              </div>
+            )}
+
+            <div className="na-actions">
+              <button
+                type="button"
+                className="na-btn na-btn--primary"
+                onClick={handleApprove}
+                disabled={busy || (state.report.fabricatedAdded.length > 0 && !fabricationAck)}
+              >
+                {state.approveLoading ? "Compiling…" : "Approve & compile"}
+              </button>
+              <button
+                type="button"
+                className="na-btn na-btn--secondary"
+                onClick={() => runTailor({})}
+                disabled={busy}
+              >
+                Regenerate
+              </button>
+            </div>
           </div>
 
           <div className="na-field na-feedback-box">

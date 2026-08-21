@@ -68,30 +68,20 @@ export default function ReportCard({ report, violations }: ReportCardProps) {
       {fabricatedAdded.length > 0 && (
         // deliberately styled harder than `.rc-violations` (which reads as a routine, fixable
         // validator warning) -- a fabricated skill is not a formatting nit, it's an unclaimable
-        // skill about to go on a real job application. Inline styling (not a new globals.css
-        // class) keeps this change scoped to this component.
-        <div
-          className="rc-fabrication-warning"
-          role="alert"
-          style={{
-            padding: "12px 14px",
-            borderRadius: 4,
-            background: "#fdecea",
-            border: "1px solid #b3261e",
-            color: "#611a15",
-          }}
-        >
-          <p style={{ fontWeight: 700, marginBottom: 6 }}>
+        // skill about to go on a real job application. Driven by --na-danger tokens (globals.css)
+        // rather than hardcoded hex, so it stays legible and on-palette in dark mode too.
+        <div className="rc-fabrication-warning" role="alert">
+          <p className="rc-fabrication-warning-title">
             {fabricatedAdded.length} possible fabricated skill{fabricatedAdded.length === 1 ? "" : "s"} detected
           </p>
-          <p style={{ marginBottom: 8 }}>
+          <p className="rc-fabrication-warning-body">
             These terms appear in the tailored resume but were not in your original resume and are
             not on your skills whitelist -- they cannot be verified as skills you actually have.
             Remove them or add them to your whitelist before approving.
           </p>
           <ul className="rc-chip-list">
             {fabricatedAdded.map((kw) => (
-              <li key={kw} className="rc-chip" style={{ background: "#b3261e", color: "#fff" }}>
+              <li key={kw} className="rc-chip rc-chip--fabricated">
                 {kw}
               </li>
             ))}

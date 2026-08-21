@@ -87,21 +87,12 @@ export default function StatusSelect({
       </label>
       <select
         id={selectId}
+        className="tr-select"
         value={status}
         onChange={handleChange}
         disabled={pending}
         aria-describedby={error ? errorId : undefined}
         aria-invalid={error ? true : undefined}
-        style={{
-          font: "inherit",
-          fontSize: 14,
-          padding: "4px 6px",
-          borderRadius: 4,
-          border: "1px solid color-mix(in srgb, currentColor 25%, transparent)",
-          background: "var(--background)",
-          color: "var(--foreground)",
-          opacity: pending ? 0.6 : 1,
-        }}
       >
         {STATUS_OPTIONS.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -109,11 +100,10 @@ export default function StatusSelect({
           </option>
         ))}
       </select>
-      {/* .tracker-inline-error is defined once in page.tsx's Home component (the only place
-          this component is mounted), not per-instance here, so N erroring rows share one
-          <style> tag instead of each emitting a near-identical one */}
+      {/* .tr-inline-error is a shared globals.css class (ink & paper --na-danger tokens), not a
+          per-instance inline style, so every erroring row/select stays on-palette in both themes */}
       {error && (
-        <p id={errorId} role="alert" className="tracker-inline-error" style={{ fontSize: 12, marginTop: 4, maxWidth: 160 }}>
+        <p id={errorId} role="alert" className="tr-inline-error" style={{ maxWidth: 160 }}>
           {error}
         </p>
       )}

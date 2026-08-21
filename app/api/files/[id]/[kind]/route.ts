@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { getApplication } from "@/lib/db";
-import { DATA_DIR } from "@/lib/config";
+import { DATA_DIR, RESUME_OWNER_NAME } from "@/lib/config";
 
 type FileKind = "pdf" | "tex";
 
@@ -12,6 +12,20 @@ const CONTENT_TYPES: Record<FileKind, string> = {
 
 function isFileKind(value: string): value is FileKind {
   return value === "pdf" || value === "tex";
+}
+
+/**
+ * The name the file lands under in a recruiter-facing downloads folder: "Resume - <Owner> <id>".
+ * The tracker id (not the company-role slug) makes it stable and unambiguous when several
+ * tailored versions are downloaded side by side.
+ *
+ * Exported and pure so the format is pinned by a test -- the route itself needs a real database
+ * row and DATA_DIR to exercise.
+ */
+export function downloadFilename(id: number, kind: FileKind): string {
+  // quotes and control characters would break out of the quoted Content-Disposition value
+  const owner = RESUME_OWNER_NAME.replace(/["\\\r\n]/g, "").trim();
+  return `Resume - ${owner} ${id}.${kind}`;
 }
 
 /**
@@ -57,14 +71,17 @@ export async function GET(
     return Response.json({ error: "File not found on disk" }, { status: 404 });
   }
 
-  // the slug directory name doubles as a human-readable download filename
-  const slug = path.basename(path.dirname(resolvedPath));
   const body = fs.readFileSync(resolvedPath);
+  const filename = downloadFilename(id, kind);
 
   return new Response(body, {
     headers: {
       "Content-Type": CONTENT_TYPES[kind],
-      "Content-Disposition": `attachment; filename="${slug}.${kind}"`,
+      // filename* carries the UTF-8 form for any non-ASCII in the owner's name; the plain
+      // filename stays as the fallback for clients that ignore RFC 5987
+      "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(
+        filename
+      )}`,
     },
   });
 }

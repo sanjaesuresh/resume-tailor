@@ -50,13 +50,6 @@ const visuallyHiddenStyle: React.CSSProperties = {
   border: 0,
 };
 
-const cellBorderStyle = "1px solid color-mix(in srgb, currentColor 12%, transparent)";
-
-// shared class for every inline row-error (status PATCH failure, notes PATCH failure): a single
-// <style> tag defining it is rendered once in Home, instead of each erroring row mounting its
-// own near-identical <style> block via a useId()-derived class
-const inlineErrorClass = "tracker-inline-error";
-
 // exported as a standalone function so it's a testable seam without a dedicated test file
 export function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -150,6 +143,7 @@ function NotesCell({
       </label>
       <textarea
         id={fieldId}
+        className="tr-notes-field"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onBlur={handleBlur}
@@ -157,22 +151,9 @@ function NotesCell({
         rows={2}
         aria-describedby={error ? errorId : undefined}
         aria-invalid={error ? true : undefined}
-        style={{
-          font: "inherit",
-          fontSize: 13,
-          width: "100%",
-          minWidth: 160,
-          resize: "vertical",
-          padding: "4px 6px",
-          borderRadius: 4,
-          border: "1px solid color-mix(in srgb, currentColor 25%, transparent)",
-          background: "var(--background)",
-          color: "var(--foreground)",
-          opacity: saving ? 0.6 : 1,
-        }}
       />
       {error && (
-        <p id={errorId} role="alert" className={inlineErrorClass} style={{ fontSize: 12, marginTop: 4 }}>
+        <p id={errorId} role="alert" className="tr-inline-error">
           {error}
         </p>
       )}
@@ -228,106 +209,48 @@ export default function Home() {
   const sorted = applications ? [...applications].sort((a, b) => b.id - a.id) : null;
 
   return (
-    <main style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 24px", width: "100%" }}>
-      {/* single shared definition for every inline row-error (status/notes PATCH failure) --
-          rendered once here rather than once per erroring row. Fixed hex red doesn't hold
-          4.5:1 contrast against both light and dark --background, and globals.css is off-limits
-          to this task, hence a component-scoped style instead of a global stylesheet edit */}
-      <style>{`
-        .${inlineErrorClass} { color: #b91c1c; }
-        @media (prefers-color-scheme: dark) {
-          .${inlineErrorClass} { color: #f87171; }
-        }
-      `}</style>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          gap: 16,
-          marginBottom: 24,
-        }}
-      >
-        <h1 style={{ fontSize: 22, fontWeight: 600 }}>Applications</h1>
-        <Link
-          href="/new"
-          style={{
-            fontSize: 14,
-            fontWeight: 500,
-            padding: "8px 14px",
-            borderRadius: 6,
-            border: "1px solid color-mix(in srgb, currentColor 25%, transparent)",
-          }}
-        >
+    <main className="tr-root">
+      <div className="tr-header">
+        <h1 className="tr-title">Applications</h1>
+        <Link href="/new" className="na-btn na-btn--secondary">
           + New Application
         </Link>
       </div>
 
       {loadError && (
-        <div
-          role="alert"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "10px 14px",
-            marginBottom: 16,
-            borderRadius: 6,
-            border: "1px solid color-mix(in srgb, currentColor 25%, transparent)",
-            background: "color-mix(in srgb, #dc2626 10%, transparent)",
-          }}
-        >
-          <span style={{ fontSize: 14 }}>{loadError}</span>
-          <button
-            type="button"
-            onClick={loadApplications}
-            style={{
-              font: "inherit",
-              fontSize: 13,
-              fontWeight: 500,
-              padding: "4px 10px",
-              borderRadius: 4,
-              border: "1px solid color-mix(in srgb, currentColor 30%, transparent)",
-              background: "transparent",
-              color: "inherit",
-              cursor: "pointer",
-            }}
-          >
+        <div role="alert" className="tr-error">
+          <span>{loadError}</span>
+          <button type="button" onClick={loadApplications} className="tr-retry-btn">
             Retry
           </button>
         </div>
       )}
 
-      {sorted === null && !loadError && <p style={{ fontSize: 14 }}>Loading applications…</p>}
+      {sorted === null && !loadError && (
+        // skeleton rows (shape-matched to the table below) rather than a bare "Loading…" string,
+        // so the page doesn't jump when the real rows arrive
+        <div className="tr-skeleton" role="status" aria-label="Loading applications">
+          <div className="tr-skeleton-row" aria-hidden="true" />
+          <div className="tr-skeleton-row" aria-hidden="true" />
+          <div className="tr-skeleton-row" aria-hidden="true" />
+        </div>
+      )}
 
       {sorted !== null && sorted.length === 0 && (
-        <p style={{ fontSize: 14, color: "var(--foreground)" }}>
+        <p className="tr-empty">
           No applications yet.{" "}
-          <Link href="/new" style={{ fontWeight: 500, textDecoration: "underline" }}>
-            Start a new application
-          </Link>{" "}
-          to tailor a resume and track it here.
+          <Link href="/new">Start a new application</Link> to tailor a resume and track it here.
         </p>
       )}
 
       {sorted !== null && sorted.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 14 }}>
+        <div className="tr-table-wrap">
+          <table className="tr-table">
             <thead>
               <tr>
                 {["Company", "Role", "Applied", "ATS score", "Status", "Notes", "Links"].map(
                   (heading) => (
-                    <th
-                      key={heading}
-                      scope="col"
-                      style={{
-                        textAlign: "left",
-                        padding: "8px 10px",
-                        borderBottom: `2px solid color-mix(in srgb, currentColor 25%, transparent)`,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
+                    <th key={heading} scope="col">
                       {heading}
                     </th>
                   )
@@ -337,17 +260,13 @@ export default function Home() {
             <tbody>
               {sorted.map((app) => (
                 <tr key={app.id}>
-                  <td style={{ padding: "10px", borderBottom: cellBorderStyle, fontWeight: 500 }}>
-                    {app.company}
-                  </td>
-                  <td style={{ padding: "10px", borderBottom: cellBorderStyle }}>{app.role}</td>
-                  <td style={{ padding: "10px", borderBottom: cellBorderStyle, whiteSpace: "nowrap" }}>
-                    {formatDate(app.appliedAt)}
-                  </td>
-                  <td style={{ padding: "10px", borderBottom: cellBorderStyle, whiteSpace: "nowrap" }}>
+                  <td>{app.company}</td>
+                  <td>{app.role}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{formatDate(app.appliedAt)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
                     <AtsScoreCell atsReport={app.atsReport} />
                   </td>
-                  <td style={{ padding: "10px", borderBottom: cellBorderStyle }}>
+                  <td>
                     <StatusSelect
                       applicationId={app.id}
                       status={app.status}
@@ -355,11 +274,11 @@ export default function Home() {
                       onStatusChange={handleStatusChange}
                     />
                   </td>
-                  <td style={{ padding: "10px", borderBottom: cellBorderStyle, minWidth: 180 }}>
+                  <td style={{ minWidth: 180 }}>
                     <NotesCell application={app} onSaved={handleNotesSaved} />
                   </td>
-                  <td style={{ padding: "10px", borderBottom: cellBorderStyle, whiteSpace: "nowrap" }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <td>
+                    <div className="tr-links">
                       {app.url ? (
                         <a href={app.url} target="_blank" rel="noopener noreferrer">
                           Posting ↗

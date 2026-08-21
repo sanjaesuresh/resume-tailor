@@ -5,6 +5,10 @@ import path from "path";
 export const MODEL = "claude-sonnet-5";
 export const MAX_TOKENS = 16000;
 
+// whose résumé this is -- used for the download filename a recruiter ends up seeing on disk.
+// Overridable via .env.local so a fork doesn't ship someone else's name.
+export const RESUME_OWNER_NAME = process.env.RESUME_OWNER_NAME?.trim() || "Sanjae Suresh";
+
 // which back end serves Claude calls. "cli" spawns the local Claude Code CLI, which bills the
 // Claude Pro subscription; "api" uses the Anthropic SDK, which needs pay-as-you-go credits on
 // the API account. CLI is the default because it is the path that works without credits.
