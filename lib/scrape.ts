@@ -86,15 +86,93 @@ function tagsToText(html: string): string {
   return decoded.replace(/\s+/g, " ").trim();
 }
 
+// boards that render their posting client-side (Ashby, Workday, most SPA career pages) still emit
+// a schema.org JobPosting block server-side, because Google Jobs requires it. Reading that beats
+// scoring containers -- it's the posting itself with none of the page chrome -- and it needs no
+// JavaScript execution, which is the only reason those pages look empty to a plain fetch.
+const JSON_LD_SCRIPT_RE = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+
+// linked data arrives in three shapes in the wild: a bare object, a top-level array, and an
+// "@graph" wrapper holding several nodes -- and "@type" is itself sometimes an array
+function collectJobPostings(value: unknown, found: Record<string, unknown>[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectJobPostings(item, found);
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+
+  const node = value as Record<string, unknown>;
+  if (node["@graph"] !== undefined) collectJobPostings(node["@graph"], found);
+
+  const type = node["@type"];
+  const isJobPosting = Array.isArray(type)
+    ? type.includes("JobPosting")
+    : type === "JobPosting";
+  if (isJobPosting) found.push(node);
+}
+
+// the description is the posting body alone, but the tailoring step reads the company and role out
+// of this same text -- so carry the sibling fields onto the front. Workday publishes an empty
+// organization name, hence the emptiness checks rather than blind interpolation.
+function jobPostingHeading(node: Record<string, unknown>): string {
+  const title = typeof node.title === "string" ? node.title.trim() : "";
+  const org = node.hiringOrganization;
+  const rawName =
+    typeof org === "object" && org !== null
+      ? (org as Record<string, unknown>).name
+      : undefined;
+  const company = typeof rawName === "string" ? rawName.trim() : "";
+
+  if (title && company) return `${title} at ${company}`;
+  return title || company;
+}
+
 /**
- * Given raw HTML, strips known noise tags (script/style/nav/header/footer/noscript),
- * then finds the densest candidate container (main/article/div/section/body) by visible
- * text length, decodes entities, and collapses whitespace.
+ * Pulls the job text out of any schema.org JobPosting published in the page's linked data.
+ * Returns "" when the page publishes none — callers fall through to container scoring.
+ */
+export function extractJobPostingJsonLd(html: string): string {
+  const nodes: Record<string, unknown>[] = [];
+
+  for (const match of html.matchAll(JSON_LD_SCRIPT_RE)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(match[1]);
+    } catch {
+      // one malformed block must never hide a valid one elsewhere on the page
+      continue;
+    }
+    collectJobPostings(parsed, nodes);
+  }
+
+  let best = "";
+  for (const node of nodes) {
+    // the description is HTML markup, so it goes through the same stripping/decoding the
+    // container path uses rather than being handed back raw
+    const description = typeof node.description === "string" ? tagsToText(node.description) : "";
+    if (!description) continue;
+
+    const text = [jobPostingHeading(node), description].filter(Boolean).join("\n\n");
+    if (text.length > best.length) best = text;
+  }
+
+  return best;
+}
+
+/**
+ * Given raw HTML, prefers a published schema.org JobPosting; failing that, strips known noise tags
+ * (script/style/nav/header/footer/noscript), then finds the densest candidate container
+ * (main/article/div/section/body) by visible text length, decodes entities, and collapses whitespace.
  *
  * Returns "" if the best candidate's text is under MIN_DESCRIPTION_LENGTH chars — callers
  * treat that as extraction failure and fall back to a manual paste box.
  */
 export function extractDescription(html: string): string {
+  // structured data first, and against the raw html: the noise-tag pass below strips <script>
+  // contents wholesale, which would take the linked data with it
+  const fromJsonLd = extractJobPostingJsonLd(html);
+  if (fromJsonLd.length >= MIN_DESCRIPTION_LENGTH) return fromJsonLd;
+
   // comments are invisible to a real reader but still just text to our tag-stripping regexes,
   // so drop them before anything else or commented-out markup gets scored as content
   let cleaned = html.replace(/<!--[\s\S]*?-->/g, " ");

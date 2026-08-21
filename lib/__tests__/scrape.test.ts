@@ -1,5 +1,21 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { extractDescription, scrapeJob } from "../scrape";
+import { extractDescription, extractJobPostingJsonLd, scrapeJob } from "../scrape";
+
+// long enough to clear the 200-char minimum, so these fixtures exercise the real accept/reject path
+const JOB_BODY =
+  "We are hiring a Backend Engineer to design and operate the services behind our payments " +
+  "platform. You will own ingestion, work closely with product and design, mentor other engineers, " +
+  "and drive reliability improvements across both our streaming and batch infrastructure at scale.";
+
+function ldScript(payload: unknown): string {
+  return `<script type="application/ld+json">${JSON.stringify(payload)}</script>`;
+}
+
+// the failure this whole strategy exists for: a client-rendered board whose visible markup is an
+// empty mount point, with the real posting sitting in linked data beside it
+function spaShell(...scripts: string[]): string {
+  return `<html><head>${scripts.join("")}</head><body><div id="root"></div></body></html>`;
+}
 
 describe("extractDescription", () => {
   it("extracts job text from a Greenhouse-like page, ignoring nav/footer noise", () => {
@@ -132,6 +148,120 @@ describe("extractDescription", () => {
 
     expect(result).toContain("Product Designer to shape the end-to-end experience");
     expect(result).not.toContain(commentedOut);
+  });
+});
+
+describe("extractDescription (schema.org JobPosting in linked data)", () => {
+  it("recovers the posting from a client-rendered page whose body is an empty mount point", () => {
+    // this is the Ashby/Workday case: container scoring sees nothing, JSON-LD has everything
+    const html = spaShell(
+      ldScript({ "@context": "https://schema.org", "@type": "JobPosting", title: "Backend Engineer", description: `<p>${JOB_BODY}</p>` })
+    );
+
+    expect(extractDescription(html)).toContain("design and operate the services behind our payments");
+  });
+
+  it("carries the title and company through, so company/role detection does not regress", () => {
+    const html = spaShell(
+      ldScript({
+        "@type": "JobPosting",
+        title: "Backend Engineer",
+        hiringOrganization: { "@type": "Organization", name: "Acme" },
+        description: JOB_BODY,
+      })
+    );
+
+    expect(extractDescription(html)).toContain("Backend Engineer at Acme");
+  });
+
+  it("omits the company when the board publishes an empty organization name (Workday does)", () => {
+    const html = spaShell(
+      ldScript({
+        "@type": "JobPosting",
+        title: "Backend Engineer",
+        hiringOrganization: { "@type": "Organization", name: "" },
+        description: JOB_BODY,
+      })
+    );
+
+    // assert on the heading line alone: the body text legitimately contains "at scale"
+    const heading = extractDescription(html).split("\n\n")[0];
+    expect(heading).toBe("Backend Engineer");
+  });
+
+  it("finds the posting inside an @graph wrapper alongside unrelated linked-data nodes", () => {
+    const html = spaShell(
+      ldScript({
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@type": "Organization", name: "Acme", url: "https://acme.example" },
+          { "@type": "BreadcrumbList", itemListElement: [] },
+          { "@type": "JobPosting", title: "Backend Engineer", description: JOB_BODY },
+        ],
+      })
+    );
+
+    const result = extractDescription(html);
+    expect(result).toContain("design and operate the services behind our payments");
+    expect(result).not.toContain("BreadcrumbList");
+  });
+
+  it("accepts @type published as an array", () => {
+    const html = spaShell(ldScript({ "@type": ["JobPosting"], description: JOB_BODY }));
+    expect(extractDescription(html)).toContain("design and operate the services");
+  });
+
+  it("skips a malformed block instead of letting it hide a valid one later on the page", () => {
+    const html = spaShell(
+      `<script type="application/ld+json">{ not valid json ]</script>`,
+      ldScript({ "@type": "JobPosting", description: JOB_BODY })
+    );
+
+    expect(extractDescription(html)).toContain("design and operate the services");
+  });
+
+  it("strips markup and decodes entities inside the description", () => {
+    const html = spaShell(
+      ldScript({
+        "@type": "JobPosting",
+        description: `<p>Join Engineering &amp; Product.</p><ul><li>${JOB_BODY}</li></ul>`,
+      })
+    );
+
+    const result = extractDescription(html);
+    expect(result).toContain("Engineering & Product");
+    expect(result).not.toContain("<li>");
+    expect(result).not.toContain("&amp;");
+  });
+
+  it("prefers the longest posting when a page publishes several", () => {
+    const shortBody = JOB_BODY.slice(0, 210);
+    const html = spaShell(
+      ldScript({ "@type": "JobPosting", description: shortBody }),
+      ldScript({ "@type": "JobPosting", description: `${JOB_BODY} You will also lead incident response.` })
+    );
+
+    expect(extractDescription(html)).toContain("lead incident response");
+  });
+
+  it("falls back to container scoring when the linked-data description is too short to trust", () => {
+    const html = `
+      <html>
+        <head>${ldScript({ "@type": "JobPosting", description: "Backend Engineer" })}</head>
+        <body><main><p>${JOB_BODY}</p></main></body>
+      </html>
+    `;
+
+    const result = extractDescription(html);
+    expect(result).toContain("design and operate the services behind our payments");
+    // the container text won outright -- the too-short heading was not prepended to it
+    expect(result.startsWith("Backend Engineer at")).toBe(false);
+  });
+
+  it("returns nothing for linked data that carries no JobPosting at all", () => {
+    const html = spaShell(ldScript({ "@type": "Organization", name: "Acme", description: JOB_BODY }));
+    expect(extractJobPostingJsonLd(html)).toBe("");
+    expect(extractDescription(html)).toBe("");
   });
 });
 
