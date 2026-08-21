@@ -84,6 +84,9 @@ describe("createCliProvider argument construction", () => {
     // CLAUDE.md/hooks/MCP config
     expect(args.slice(args.indexOf("--tools"))[1]).toBe("");
     expect(args).toContain("--safe-mode");
+    // benchmarked win: low effort cuts wall time ~2.3x with no validator/ATS regression on this
+    // rewrite-shaped task -- pin it so a future edit can't silently drop back to default effort
+    expect(args.slice(args.indexOf("--effort"))[1]).toBe("low");
 
     const sentSchema = JSON.parse(args[args.indexOf("--json-schema") + 1]);
     expect(sentSchema.required.sort()).toEqual(["company", "role", "tex"]);
