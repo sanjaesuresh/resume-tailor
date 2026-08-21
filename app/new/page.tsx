@@ -278,11 +278,17 @@ export default function NewApplicationPage() {
   // the report flags fabricatedAdded terms. Reset on every fresh tailor result (below) so an
   // acknowledgement never silently carries over onto a different draft's fabricated terms.
   const [fabricationAck, setFabricationAck] = useState(false);
-
   // guards against setState-via-dispatch after unmount (e.g. user navigates to "/" mid-request) --
-  // the fetch itself isn't cancelled, but its result is discarded rather than dispatched
+  // the fetch itself isn't cancelled, but its result is discarded rather than dispatched.
+  //
+  // The re-arm on mount is load-bearing, not defensive: useRef preserves its value across React's
+  // StrictMode mount/unmount/remount cycle (on by default in the app router since 13.5.1) and
+  // across every Fast Refresh, so the initial `true` is only ever applied once. Without setting it
+  // back here, the first cleanup latches it to false forever and every fetch result is silently
+  // discarded -- the page sticks on "Fetching…"/"Tailoring…" with no error, in dev only.
   const mountedRef = useRef(true);
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
