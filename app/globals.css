@@ -551,3 +551,50 @@ a {
 .dv-line--same {
   color: var(--na-ink-muted, #6b6660);
 }
+
+/* Review-step tabs: LaTeX diff | PDF preview. Underline-style rather than boxed, so the active
+   pane reads as a continuation of the panel below it rather than a separate card. */
+.na-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--na-rule, #ddd6cb);
+}
+
+.na-tab {
+  padding: 10px 16px;
+  border: none;
+  /* transparent placeholder keeps the label from shifting 2px when a tab becomes active */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--na-ink-muted, #6b6660);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .na-tab:hover {
+    color: var(--na-ink, #1c1b1a);
+  }
+}
+
+.na-tab--active {
+  color: var(--na-ink, #1c1b1a);
+  border-bottom-color: var(--na-accent, #7c2d12);
+}
+
+.pp-frame {
+  width: 100%;
+  /* tall enough to read a page of résumé without scrolling the viewer inside the page */
+  height: 720px;
+  border: 1px solid var(--na-rule, #ddd6cb);
+  border-radius: 6px;
+  background: var(--na-paper-raised, #fff);
+}
+
+.pp-status {
+  padding: 24px 0;
+  color: var(--na-ink-muted, #6b6660);
+  font-size: 14px;
+}

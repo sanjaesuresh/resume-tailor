@@ -6,6 +6,7 @@ import type { AtsReport } from "@/lib/ats";
 import type { TailorViolation } from "@/lib/tailor";
 import ReportCard from "@/app/components/ReportCard";
 import DiffView from "@/app/components/DiffView";
+import PdfPreview from "@/app/components/PdfPreview";
 
 // ---- explicit state machine -------------------------------------------------
 // Each stage is its own object shape (a discriminated union keyed on `stage`) rather than one big
@@ -241,6 +242,13 @@ function reducer(state: State, action: Action): State {
   }
 }
 
+type ReviewTab = "latex" | "pdf";
+
+const REVIEW_TABS: { id: ReviewTab; label: string }[] = [
+  { id: "latex", label: "LaTeX diff" },
+  { id: "pdf", label: "PDF preview" },
+];
+
 const STEPS: { stage: Stage; label: string }[] = [
   { stage: "url", label: "Job posting" },
   { stage: "confirm", label: "Confirm description" },
@@ -278,6 +286,23 @@ export default function NewApplicationPage() {
   // the report flags fabricatedAdded terms. Reset on every fresh tailor result (below) so an
   // acknowledgement never silently carries over onto a different draft's fabricated terms.
   const [fabricationAck, setFabricationAck] = useState(false);
+  // which review pane is showing. Deliberately not in the reducer: it's view state, not a step in
+  // the flow, and it must survive a regenerate so you stay on the pane you were reading.
+  const [reviewTab, setReviewTab] = useState<ReviewTab>("latex");
+
+  // WAI-ARIA tabs: left/right move between tabs and take focus with them
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+
+    const current = REVIEW_TABS.findIndex((t) => t.id === reviewTab);
+    const step = event.key === "ArrowRight" ? 1 : -1;
+    const next = REVIEW_TABS[(current + step + REVIEW_TABS.length) % REVIEW_TABS.length];
+
+    setReviewTab(next.id);
+    document.getElementById(`tab-${next.id}`)?.focus();
+  }
+
   // mirrors the server's scrape/tailor/approve progress into the DevTools console, live. Dev only:
   // this exists to make the ~70s tailoring call legible while it runs, not to ship to users.
   // Failures are deliberately silent -- a missing log stream must never disturb the actual flow.
@@ -647,7 +672,47 @@ export default function NewApplicationPage() {
           </div>
 
           <ReportCard report={state.report} violations={state.violations} />
-          <DiffView baseTex={state.baseTex} tailoredTex={state.tex} />
+
+          <div className="na-tabs" role="tablist" aria-label="Résumé review">
+            {REVIEW_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                id={`tab-${tab.id}`}
+                aria-selected={reviewTab === tab.id}
+                aria-controls={`panel-${tab.id}`}
+                // roving tabindex: the tablist is one stop, arrows move within it
+                tabIndex={reviewTab === tab.id ? 0 : -1}
+                className={`na-tab${reviewTab === tab.id ? " na-tab--active" : ""}`}
+                onClick={() => setReviewTab(tab.id)}
+                onKeyDown={handleTabKeyDown}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* both panels stay mounted so the PDF compile starts as a prefetch and each panel
+              keeps its own scroll position across switches */}
+          <div
+            role="tabpanel"
+            id="panel-latex"
+            aria-labelledby="tab-latex"
+            hidden={reviewTab !== "latex"}
+          >
+            <DiffView baseTex={state.baseTex} tailoredTex={state.tex} />
+          </div>
+          <div
+            role="tabpanel"
+            id="panel-pdf"
+            aria-labelledby="tab-pdf"
+            hidden={reviewTab !== "pdf"}
+          >
+            {/* keyed on the draft: a regenerate remounts the preview, resetting it to its
+                loading state without the component reaching for setState inside an effect */}
+            <PdfPreview key={state.tex} tex={state.tex} />
+          </div>
 
           {state.approveError && (
             <div className="na-error" role="alert">
