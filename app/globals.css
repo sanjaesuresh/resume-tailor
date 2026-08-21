@@ -1,12 +1,49 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Task 9 (new-application flow) design tokens -- "ink & paper": a warm off-white surface with
+     near-black ink text and a deep rust accent, chosen deliberately over the default
+     blue/indigo-on-white SaaS look. Diff add/remove and warning colors are the one place a
+     conventional data-viz meaning (green=added, red=removed, amber=warning) is kept on purpose --
+     that's an expected, functional convention here, not a decorative default. */
+  --na-paper: #faf7f2;
+  --na-paper-raised: #ffffff;
+  --na-ink: #1c1b1a;
+  --na-ink-muted: #6b6660;
+  --na-rule: #ddd6cb;
+  --na-accent: #7c2d12;
+  --na-accent-hover: #601f0a;
+  --na-focus: #1857b3;
+  --na-success: #1a7f37;
+  --na-success-bg: #e7f3ea;
+  --na-danger: #a3241a;
+  --na-danger-bg: #fbe2df;
+  --na-warn: #6b3d05;
+  --na-warn-bg: #fbe9c8;
+  --na-neutral-bg: #efeae1;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --na-paper: #17140f;
+    --na-paper-raised: #221e17;
+    --na-ink: #f2ede4;
+    --na-ink-muted: #b3aa9c;
+    --na-rule: #3a352c;
+    --na-accent: #e08a5b;
+    --na-accent-hover: #f3a878;
+    --na-focus: #6fa8ff;
+    --na-success: #4ade80;
+    --na-success-bg: #16301f;
+    --na-danger: #f28b7f;
+    --na-danger-bg: #3a1712;
+    --na-warn: #f0c674;
+    --na-warn-bg: #3a2c0d;
+    --na-neutral-bg: #2a251d;
   }
 }
 
@@ -46,4 +83,471 @@ a {
   html {
     color-scheme: dark;
   }
+}
+
+/* a visible focus ring is a site-wide baseline, not just the new-application flow's concern --
+   the default browser ring is easy to lose against colored buttons, so make it explicit and
+   consistent (only for keyboard focus, via :focus-visible, so mouse clicks stay ring-free) */
+:focus-visible {
+  outline: 2px solid var(--na-focus, #1857b3);
+  outline-offset: 2px;
+}
+
+/* ---- shared nav (layout.tsx) ------------------------------------------------------------- */
+
+.site-nav {
+  border-bottom: 1px solid var(--na-rule, #ddd6cb);
+  background: var(--na-paper-raised, #fff);
+}
+
+.site-nav nav {
+  display: flex;
+  gap: 24px;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 16px 24px;
+  font-family: var(--font-geist-sans, Arial, Helvetica, sans-serif);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.site-nav a {
+  color: var(--na-ink, #1c1b1a);
+  padding: 4px 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.site-nav a:hover {
+  border-bottom-color: var(--na-accent, #7c2d12);
+}
+
+/* ---- New Application flow (app/new/page.tsx) --------------------------------------------- */
+
+.na-root {
+  flex: 1;
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  font-family: var(--font-geist-sans, Arial, Helvetica, sans-serif);
+  color: var(--na-ink, #1c1b1a);
+  background: var(--na-paper, #faf7f2);
+}
+
+.na-steps {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  margin-bottom: 32px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--na-ink-muted, #6b6660);
+}
+
+.na-step {
+  flex: 1;
+  padding-bottom: 8px;
+  border-bottom: 3px solid var(--na-rule, #ddd6cb);
+}
+
+.na-step--done {
+  color: var(--na-ink, #1c1b1a);
+  border-bottom-color: var(--na-accent, #7c2d12);
+}
+
+.na-step--current {
+  color: var(--na-accent, #7c2d12);
+  border-bottom-color: var(--na-accent, #7c2d12);
+}
+
+.na-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.na-heading {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+/* focusable via tabIndex={-1} for post-transition focus management, not part of tab order */
+.na-heading:focus-visible {
+  outline: none;
+}
+
+.na-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.na-field label,
+.na-readonly-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--na-ink-muted, #6b6660);
+}
+
+.na-readonly-value {
+  padding: 10px 12px;
+  border: 1px solid var(--na-rule, #ddd6cb);
+  border-radius: 4px;
+  background: var(--na-neutral-bg, #efeae1);
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.na-field input[type="text"],
+.na-field input[type="url"],
+.na-field textarea {
+  padding: 10px 12px;
+  border: 1px solid var(--na-rule, #ddd6cb);
+  border-radius: 4px;
+  background: var(--na-paper-raised, #fff);
+  color: var(--na-ink, #1c1b1a);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.na-field textarea {
+  font-family: var(--font-geist-mono, monospace);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.na-field input:disabled,
+.na-field textarea:disabled {
+  opacity: 0.6;
+}
+
+.na-field input[aria-invalid="true"] {
+  border-color: var(--na-danger, #a3241a);
+}
+
+.na-field-error {
+  font-size: 13px;
+  color: var(--na-danger, #a3241a);
+}
+
+.na-review-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 560px) {
+  .na-review-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.na-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.na-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.na-btn--primary {
+  background: var(--na-accent, #7c2d12);
+  color: #fff;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .na-btn--primary:hover:not(:disabled) {
+    background: var(--na-accent-hover, #601f0a);
+  }
+}
+
+.na-btn--secondary {
+  background: transparent;
+  border-color: var(--na-rule, #ddd6cb);
+  color: var(--na-ink, #1c1b1a);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .na-btn--secondary:hover:not(:disabled) {
+    background: var(--na-neutral-bg, #efeae1);
+  }
+}
+
+.na-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.na-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--na-accent, #7c2d12);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  align-self: center;
+}
+
+.na-error {
+  padding: 12px 14px;
+  border-radius: 4px;
+  background: var(--na-danger-bg, #fbe2df);
+  color: var(--na-danger, #a3241a);
+  font-size: 14px;
+}
+
+.na-error p {
+  margin: 0 0 8px;
+}
+
+.na-compile-log {
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 4px;
+  background: var(--na-paper-raised, #fff);
+  color: var(--na-ink, #1c1b1a);
+  font-family: var(--font-geist-mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.na-progress-note {
+  font-size: 14px;
+  color: var(--na-ink-muted, #6b6660);
+}
+
+.na-paste-box {
+  padding: 16px;
+  border: 1px solid var(--na-rule, #ddd6cb);
+  border-radius: 6px;
+  background: var(--na-paper-raised, #fff);
+}
+
+.na-feedback-box {
+  padding: 16px;
+  border: 1px solid var(--na-rule, #ddd6cb);
+  border-radius: 6px;
+  background: var(--na-paper-raised, #fff);
+}
+
+.na-done-summary {
+  font-size: 16px;
+  color: var(--na-ink-muted, #6b6660);
+}
+
+/* ---- ReportCard (app/components/ReportCard.tsx) ------------------------------------------- */
+
+.rc-root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--na-rule, #ddd6cb);
+  border-radius: 6px;
+  background: var(--na-paper-raised, #fff);
+}
+
+.rc-heading {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.rc-subheading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--na-ink-muted, #6b6660);
+  margin-top: 4px;
+}
+
+.rc-empty,
+.rc-all-matched,
+.rc-unclaimed-note {
+  font-size: 13px;
+  color: var(--na-ink-muted, #6b6660);
+}
+
+.rc-all-matched {
+  color: var(--na-success, #1a7f37);
+  font-weight: 600;
+}
+
+.rc-violations {
+  padding: 12px 14px;
+  border-radius: 4px;
+  background: var(--na-warn-bg, #fbe9c8);
+  color: var(--na-warn, #6b3d05);
+}
+
+.rc-violations-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.rc-violations-list {
+  padding-left: 18px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rc-violation-rule {
+  font-weight: 700;
+}
+
+.rc-scores {
+  display: flex;
+  gap: 24px;
+}
+
+.rc-score {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.rc-score label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--na-ink-muted, #6b6660);
+}
+
+.rc-score progress {
+  width: 100%;
+  height: 10px;
+  accent-color: var(--na-accent, #7c2d12);
+}
+
+.rc-score-value {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rc-delta {
+  font-size: 13px;
+  color: var(--na-ink-muted, #6b6660);
+}
+
+.rc-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+}
+
+.rc-chip {
+  padding: 3px 10px;
+  /* same 4px radius scale as buttons/inputs/cards -- a pill shape here would be the only
+     maximally-rounded element on the page, not an intentional choice */
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rc-chip--matched {
+  background: var(--na-success-bg, #e7f3ea);
+  color: var(--na-success, #1a7f37);
+}
+
+.rc-chip--missing {
+  background: var(--na-neutral-bg, #efeae1);
+  color: var(--na-ink, #1c1b1a);
+}
+
+.rc-chip--unclaimed {
+  background: transparent;
+  border: 1px dashed var(--na-rule, #ddd6cb);
+  color: var(--na-ink-muted, #6b6660);
+}
+
+/* ---- DiffView (app/components/DiffView.tsx) ----------------------------------------------- */
+
+.dv-root {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dv-heading {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.dv-legend {
+  font-size: 13px;
+  color: var(--na-ink-muted, #6b6660);
+}
+
+.dv-legend-added {
+  color: var(--na-success, #1a7f37);
+  font-weight: 700;
+}
+
+.dv-legend-removed {
+  color: var(--na-danger, #a3241a);
+  font-weight: 700;
+}
+
+.dv-empty {
+  font-size: 14px;
+  color: var(--na-ink-muted, #6b6660);
+}
+
+.dv-pre {
+  max-height: 480px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--na-rule, #ddd6cb);
+  border-radius: 6px;
+  background: var(--na-paper-raised, #fff);
+  font-family: var(--font-geist-mono, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.dv-line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dv-sign {
+  flex: none;
+  width: 1ch;
+  font-weight: 700;
+}
+
+.dv-line--added {
+  background: var(--na-success-bg, #e7f3ea);
+  color: var(--na-success, #1a7f37);
+}
+
+.dv-line--removed {
+  background: var(--na-danger-bg, #fbe2df);
+  color: var(--na-danger, #a3241a);
+}
+
+.dv-line--same {
+  color: var(--na-ink-muted, #6b6660);
 }
