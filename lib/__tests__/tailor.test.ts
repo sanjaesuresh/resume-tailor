@@ -1,7 +1,9 @@
 import fs from "fs";
-import { describe, expect, it, vi } from "vitest";
-import { tailorResume, type ClaudeClient, type ClaudeParseParams, type TailoredResume } from "../tailor";
+import { describe, expect, it } from "vitest";
+import { tailorResume, type TailoredResume } from "../tailor";
+import type { ClaudeProvider, StructuredRequest } from "../provider";
 import { WHITELIST_PATH } from "../config";
+import { z } from "zod";
 
 // 2 experience blocks of 3 bullets each, real template macros (\resumeItem, \section) so the
 // validator's default bulletMacro is exercised, not just a simplified fixture -- mirrors the
@@ -36,17 +38,22 @@ const whitelist = ["Python", "SQL", "Git", "Docker", "Kubernetes"];
 const jobDescription =
   "Looking for a backend engineer with strong Python skills, experience with Docker containers, and Kubernetes orchestration.";
 
-// builds a fake Claude client whose messages.parse resolves through a queue of canned responses
-// (one per call) -- lets tests script exact multi-call sequences (retry-then-valid, exhausted)
-function fakeClient(responses: (TailoredResume | null)[]): { client: ClaudeClient; parse: ReturnType<typeof vi.fn> } {
-  const parse = vi.fn<(params: ClaudeParseParams) => Promise<{ parsed_output: TailoredResume | null }>>();
-  responses.forEach((r) => parse.mockResolvedValueOnce({ parsed_output: r }));
-  // if called more times than scripted, keep returning the last response (guards against an
-  // infinite-seeming loop silently under-asserting call count)
-  if (responses.length > 0) {
-    parse.mockResolvedValue({ parsed_output: responses[responses.length - 1] });
-  }
-  return { client: { messages: { parse } }, parse };
+// builds a fake provider that resolves through a queue of canned responses (one per call) and
+// records every request -- lets tests script exact multi-call sequences (retry-then-valid,
+// exhausted) without any back end, API or CLI
+function fakeProvider(responses: (TailoredResume | null)[]): {
+  provider: ClaudeProvider;
+  calls: StructuredRequest<z.ZodType>[];
+} {
+  const calls: StructuredRequest<z.ZodType>[] = [];
+  const provider: ClaudeProvider = async <S extends z.ZodType>(req: StructuredRequest<S>) => {
+    calls.push(req as unknown as StructuredRequest<z.ZodType>);
+    // if called more times than scripted, keep returning the last response (guards against an
+    // infinite-seeming loop silently under-asserting call count)
+    const index = Math.min(calls.length - 1, responses.length - 1);
+    return responses[index] as unknown as z.infer<S> | null;
+  };
+  return { provider, calls };
 }
 
 describe("tailorResume", () => {
@@ -55,23 +62,27 @@ describe("tailorResume", () => {
       "Built \\textbf{Python} services for internal tooling",
       "Built \\textbf{Python} and \\textbf{Docker} services for internal tooling"
     );
-    const { client, parse } = fakeClient([{ company: "Acme Corp", role: "Backend Engineer", tex: validTex }]);
+    const { provider, calls } = fakeProvider([
+      { company: "Acme Corp", role: "Backend Engineer", tex: validTex },
+    ]);
 
-    const result = await tailorResume(jobDescription, { client, baseTex, whitelist });
+    const result = await tailorResume(jobDescription, { provider, baseTex, whitelist });
 
-    expect(parse).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
     expect(result.violations).toEqual([]);
     expect(result.company).toBe("Acme Corp");
     expect(result.role).toBe("Backend Engineer");
     expect(result.report.scoreAfter).toBeGreaterThanOrEqual(result.report.scoreBefore);
 
-    // never pass temperature/top_p/top_k (this model 400s), and never use an assistant-message
-    // prefill -- regression guard for the SDK-specifics called out in the brief
-    const callArgs = parse.mock.calls[0][0] as Record<string, unknown>;
-    expect(callArgs.temperature).toBeUndefined();
-    expect(callArgs.top_p).toBeUndefined();
-    expect(callArgs.top_k).toBeUndefined();
-    expect((callArgs.messages as { role: string }[]).every((m) => m.role === "user")).toBe(true);
+    // the whole request goes through the provider seam: the no-fabrication system prompt, the
+    // user message, and the schema that pins company/role/tex -- whichever back end serves it
+    expect(calls[0].system).toContain("whitelist");
+    expect(calls[0].user).toContain(jobDescription);
+    expect(Object.keys(z.toJSONSchema(calls[0].schema).properties ?? {}).sort()).toEqual([
+      "company",
+      "role",
+      "tex",
+    ]);
   });
 
   it("retry path: violating tex on call 1, corrected tex on call 2 -- exactly 2 calls, final violations empty", async () => {
@@ -86,14 +97,14 @@ describe("tailorResume", () => {
       "Built \\textbf{Python} and \\textbf{Docker} services for internal tooling"
     );
 
-    const { client, parse } = fakeClient([
+    const { provider, calls } = fakeProvider([
       { company: "Acme Corp", role: "Backend Engineer", tex: violatingTex },
       { company: "Acme Corp", role: "Backend Engineer", tex: correctedTex },
     ]);
 
-    const result = await tailorResume(jobDescription, { client, baseTex, whitelist });
+    const result = await tailorResume(jobDescription, { provider, baseTex, whitelist });
 
-    expect(parse).toHaveBeenCalledTimes(2);
+    expect(calls).toHaveLength(2);
     expect(result.violations).toEqual([]);
     expect(result.tex).toBe(correctedTex);
   });
@@ -104,15 +115,15 @@ describe("tailorResume", () => {
       "    \\resumeItem{Led a small team of two engineers on a migration project}\n",
       ""
     );
-    const { client, parse } = fakeClient([
+    const { provider, calls } = fakeProvider([
       { company: "Acme Corp", role: "Backend Engineer", tex: violatingTex },
       { company: "Acme Corp", role: "Backend Engineer", tex: violatingTex },
       { company: "Acme Corp", role: "Backend Engineer", tex: violatingTex },
     ]);
 
-    const result = await tailorResume(jobDescription, { client, baseTex, whitelist });
+    const result = await tailorResume(jobDescription, { provider, baseTex, whitelist });
 
-    expect(parse).toHaveBeenCalledTimes(3);
+    expect(calls).toHaveLength(3);
     expect(result.violations.length).toBeGreaterThan(0);
     expect(result.violations.some((v) => v.rule === "removed-line")).toBe(true);
     // the retry loop still returns the last tex so the UI can show it with warnings, not just an error
@@ -126,31 +137,32 @@ describe("tailorResume", () => {
     );
     const correctedTex = baseTex;
 
-    const { client, parse } = fakeClient([
+    const { provider, calls } = fakeProvider([
       { company: "Acme Corp", role: "Backend Engineer", tex: violatingTex },
       { company: "Acme Corp", role: "Backend Engineer", tex: correctedTex },
     ]);
 
-    await tailorResume(jobDescription, { client, baseTex, whitelist });
+    await tailorResume(jobDescription, { provider, baseTex, whitelist });
 
-    const secondCallMessage = (parse.mock.calls[1][0] as ClaudeParseParams).messages[0].content;
+    const secondCallMessage = calls[1].user;
     expect(secondCallMessage).toContain("removed-line");
     expect(secondCallMessage).toContain(violatingTex);
   });
 
-  it("null parsed_output: retries with a distinct parse-failure tag, then surfaces the documented error on exhaustion", async () => {
-    // every call comes back with parsed_output: null (structured parse failure), never a tex at all
-    const { client, parse } = fakeClient([null, null, null]);
+  it("null response: retries with a distinct parse-failure tag, then surfaces the documented error on exhaustion", async () => {
+    // every call comes back null (the provider's "Claude answered but it didn't match the
+    // schema" signal), never a tex at all
+    const { provider, calls } = fakeProvider([null, null, null]);
 
-    await expect(tailorResume(jobDescription, { client, baseTex, whitelist })).rejects.toThrow(
+    await expect(tailorResume(jobDescription, { provider, baseTex, whitelist })).rejects.toThrow(
       "Claude did not return a parseable resume after all retries"
     );
 
-    expect(parse).toHaveBeenCalledTimes(3);
+    expect(calls).toHaveLength(3);
 
     // the retry message must name the parse failure distinctly from "removed-line" (which means a
     // section/bullet count shrank, not "nothing came back")
-    const secondCallMessage = (parse.mock.calls[1][0] as ClaudeParseParams).messages[0].content;
+    const secondCallMessage = calls[1].user;
     expect(secondCallMessage).toContain("unparseable-response");
     expect(secondCallMessage).not.toContain("[removed-line]");
     expect(secondCallMessage).toMatch(/could not be parsed/i);
@@ -167,14 +179,14 @@ describe("tailorResume", () => {
     );
     const correctedTex = baseTex;
 
-    const { client, parse } = fakeClient([
+    const { provider, calls } = fakeProvider([
       { company: "Acme Corp", role: "Backend Engineer", tex: violatingTex },
       { company: "Acme Corp", role: "Backend Engineer", tex: correctedTex },
     ]);
 
-    await tailorResume(jobDescription, { client, baseTex, whitelist, feedback, previousTex });
+    await tailorResume(jobDescription, { provider, baseTex, whitelist, feedback, previousTex });
 
-    const secondCallMessage = (parse.mock.calls[1][0] as ClaudeParseParams).messages[0].content;
+    const secondCallMessage = calls[1].user;
     expect(secondCallMessage).toContain(feedback);
     expect(secondCallMessage).toContain("removed-line");
   });
@@ -193,13 +205,13 @@ describe("tailorResume", () => {
       "Built \\textbf{Python} services for internal tooling",
       "Built \\textbf{Python} and \\textbf{Terraform} services for internal tooling"
     );
-    const { client } = fakeClient([
+    const { provider } = fakeProvider([
       { company: "Acme Corp", role: "Backend Engineer", tex },
       { company: "Acme Corp", role: "Backend Engineer", tex },
       { company: "Acme Corp", role: "Backend Engineer", tex },
     ]);
 
-    const result = await tailorResume(jobDescription, { client, baseTex }); // no whitelist override
+    const result = await tailorResume(jobDescription, { provider, baseTex }); // no whitelist override
 
     expect(result.violations.some((v) => v.rule === "non-whitelisted-keyword")).toBe(true);
   });

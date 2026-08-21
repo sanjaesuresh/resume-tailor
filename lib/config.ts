@@ -5,6 +5,23 @@ import path from "path";
 export const MODEL = "claude-sonnet-5";
 export const MAX_TOKENS = 16000;
 
+// which back end serves Claude calls. "cli" spawns the local Claude Code CLI, which bills the
+// Claude Pro subscription; "api" uses the Anthropic SDK, which needs pay-as-you-go credits on
+// the API account. CLI is the default because it is the path that works without credits.
+export type ProviderName = "cli" | "api";
+
+// exported (and pure) so provider selection is unit-testable without mutating process.env
+export function resolveProviderName(raw: string | undefined): ProviderName {
+  const value = (raw ?? "").trim().toLowerCase();
+  if (value === "") return "cli";
+  if (value === "cli" || value === "api") return value;
+  // a typo here would silently route every call to the other billing account, so fail loudly
+  // at startup rather than defaulting and surprising the user with a credit-balance 400
+  throw new Error(`Invalid CLAUDE_PROVIDER "${raw}" -- expected "cli" or "api"`);
+}
+
+export const PROVIDER = resolveProviderName(process.env.CLAUDE_PROVIDER);
+
 // resolved from process.cwd() (not __dirname) so these work identically from API routes and vitest
 export const DATA_DIR = path.join(process.cwd(), "data");
 export const ASSETS_DIR = path.join(process.cwd(), "assets");

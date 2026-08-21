@@ -1,8 +1,7 @@
 import fs from "fs";
-import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import { MODEL, MAX_TOKENS, BASE_RESUME_PATH, WHITELIST_PATH } from "./config";
+import { BASE_RESUME_PATH, WHITELIST_PATH } from "./config";
+import { getProvider, type ClaudeProvider } from "./provider";
 import { validateTailored, type Rule } from "./validator";
 import { buildReport, type AtsReport } from "./ats";
 
@@ -19,22 +18,6 @@ const TailoredResumeSchema = z.object({
 });
 
 export type TailoredResume = z.infer<typeof TailoredResumeSchema>;
-
-// the exact shape this module calls on a Claude client -- narrow and duck-typed so tests can
-// inject a fake stub without constructing (or type-fighting with) the real Anthropic SDK client
-export interface ClaudeParseParams {
-  model: string;
-  max_tokens: number;
-  system: string;
-  messages: { role: "user"; content: string }[];
-  output_config: { format: ReturnType<typeof zodOutputFormat<typeof TailoredResumeSchema>> };
-}
-
-export interface ClaudeClient {
-  messages: {
-    parse(params: ClaudeParseParams): Promise<{ parsed_output: TailoredResume | null }>;
-  };
-}
 
 // validator.ts's `Rule` union is deliberately closed to the four deterministic, code-enforced
 // checks -- a totally unparseable Claude response isn't one of those (there's no tex to check
@@ -58,7 +41,7 @@ export interface TailorResult {
 }
 
 export interface TailorOptions {
-  client?: ClaudeClient; // inject a fake in tests; real Anthropic() is constructed lazily otherwise
+  provider?: ClaudeProvider; // inject a fake in tests; the configured provider is built lazily otherwise
   baseTex?: string; // override the on-disk base resume (tests)
   whitelist?: string[]; // override the on-disk whitelist (tests)
   feedback?: string; // free-text "request changes" tweak from the review-gate UI
@@ -160,23 +143,6 @@ function buildRetryUserMessage(
   return parts.join("\n\n");
 }
 
-// no temperature/top_p/top_k here -- this model rejects them (400). No assistant-message
-// prefill either -- also rejected. Structured output comes from output_config.format alone.
-async function callClaude(
-  client: ClaudeClient,
-  systemPrompt: string,
-  userMessage: string
-): Promise<TailoredResume | null> {
-  const response = await client.messages.parse({
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-    output_config: { format: zodOutputFormat(TailoredResumeSchema) },
-  });
-  return response.parsed_output;
-}
-
 /**
  * Sends the base resume + job description to Claude, validates the result against the
  * code-enforced rules (Task 4), and retries (feeding back the specific violations) up to
@@ -189,9 +155,9 @@ export async function tailorResume(
 ): Promise<TailorResult> {
   const baseTex = opts.baseTex ?? fs.readFileSync(BASE_RESUME_PATH, "utf-8");
   const whitelist = opts.whitelist ?? parseWhitelist(fs.readFileSync(WHITELIST_PATH, "utf-8"));
-  // constructed lazily, and only when the caller didn't inject a fake, so tests never touch
-  // the network or require an API key
-  const client: ClaudeClient = opts.client ?? (new Anthropic() as unknown as ClaudeClient);
+  // built lazily, and only when the caller didn't inject a fake, so tests never touch the
+  // network, spawn the CLI, or require an API key
+  const provider = opts.provider ?? getProvider();
 
   let userMessage = buildInitialUserMessage(
     baseTex,
@@ -205,7 +171,11 @@ export async function tailorResume(
   let violations: TailorViolation[] = [];
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    parsed = await callClaude(client, SYSTEM_PROMPT, userMessage);
+    parsed = await provider({
+      system: SYSTEM_PROMPT,
+      user: userMessage,
+      schema: TailoredResumeSchema,
+    });
 
     if (!parsed) {
       // structured parse failed -- nothing to validate (there's no tex at all), so this is

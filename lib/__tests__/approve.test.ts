@@ -6,7 +6,8 @@ import { persistApplication, isValidReport } from "../persist";
 import { ASSETS_DIR } from "../config";
 // "@/" aliased import -- only resolvable now that vitest.config.ts maps it to the project root;
 // this import failing to load at all is the regression guard for that alias's absence
-import { approve, type FixClaudeClient } from "@/app/api/approve/route";
+import { approve } from "@/app/api/approve/route";
+import type { ClaudeProvider } from "@/lib/provider";
 
 // each test gets its own temp data dir so persisted files/db never touch the real data/ directory
 function tempDataDir(): string {
@@ -249,14 +250,10 @@ describe("isValidReport", () => {
 const SAMPLE_TEX_PATH = path.join(ASSETS_DIR, "base-resume.sample.tex");
 const validTex = fs.readFileSync(SAMPLE_TEX_PATH, "utf-8");
 
-// builds a fake FixClaudeClient whose messages.parse always resolves to the given fixed tex --
-// lets tests script the auto-fixer's output without ever touching the network
-function fakeFixClient(fixedTex: string): FixClaudeClient {
-  return {
-    messages: {
-      parse: vi.fn().mockResolvedValue({ parsed_output: { tex: fixedTex } }),
-    },
-  };
+// builds a fake provider that always resolves to the given fixed tex -- lets tests script the
+// auto-fixer's output without ever touching the network or spawning the CLI
+function fakeFixProvider(fixedTex: string): ClaudeProvider {
+  return vi.fn().mockResolvedValue({ tex: fixedTex });
 }
 
 describe("approve (B4: auto-fixed tex is re-validated, not trusted blindly)", () => {
@@ -265,9 +262,9 @@ describe("approve (B4: auto-fixed tex is re-validated, not trusted blindly)", ()
     async () => {
       const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "resume-tailor-approve-"));
       try {
-        // deps.client deliberately omitted: if compileWithAutoFix's fixFn closure were ever
-        // invoked on a first-try success, this would be the only place that could construct a
-        // real `new Anthropic()` -- proving it's never reached is what proves the lazy fix
+        // deps.provider deliberately omitted: if compileWithAutoFix's fixFn closure were ever
+        // invoked on a first-try success, this would be the only place that could build a real
+        // provider (and spawn the CLI) -- proving it's never reached is what proves the lazy fix
         const response = await approve(
           { tex: validTex, company: "Acme", role: "Engineer", report: { scoreBefore: 10, scoreAfter: 50 } },
           { dataDir }
@@ -306,11 +303,11 @@ describe("approve (B4: auto-fixed tex is re-validated, not trusted blindly)", ()
         );
         expect(fixedTex).not.toBe(validTex);
 
-        const client = fakeFixClient(fixedTex);
+        const provider = fakeFixProvider(fixedTex);
 
         const response = await approve(
           { tex: approvedTex, company: "Acme", role: "Engineer", report: { scoreBefore: 10, scoreAfter: 50 } },
-          { client, baseTex: validTex, whitelist: [], dataDir }
+          { provider, baseTex: validTex, whitelist: [], dataDir }
         );
 
         expect(response.status).toBe(422);
@@ -342,11 +339,11 @@ describe("approve (B4: auto-fixed tex is re-validated, not trusted blindly)", ()
         );
         // the fixer just removes the broken tail, changing nothing else -- clean relative to the
         // approved draft, so this must be allowed to save
-        const client = fakeFixClient(validTex);
+        const provider = fakeFixProvider(validTex);
 
         const response = await approve(
           { tex: approvedTex, company: "Acme", role: "Engineer", report: { scoreBefore: 10, scoreAfter: 50 } },
-          { client, baseTex: validTex, whitelist: [], dataDir }
+          { provider, baseTex: validTex, whitelist: [], dataDir }
         );
 
         expect(response.status).toBe(200);

@@ -1,6 +1,7 @@
 import fs from "fs";
 import { tailorResume } from "@/lib/tailor";
 import { BASE_RESUME_PATH } from "@/lib/config";
+import { activeProviderName } from "@/lib/provider";
 
 // thin wrapper over tailorResume: maps the retry-loop result to JSON and turns any hard
 // Anthropic-call failure (network, auth, every retry unparseable) into a 502 rather than
@@ -29,9 +30,14 @@ export async function POST(request: Request) {
       violations: result.violations,
       report: result.report,
       baseTex,
+      // which back end actually answered ("cli" = Claude Pro subscription, "api" = metered
+      // credits) -- additive, so existing clients are unaffected
+      provider: activeProviderName(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to tailor resume";
-    return Response.json({ error: message }, { status: 502 });
+    // provider errors already name their own fix (missing CLI, logged out); tagging the active
+    // back end keeps a bare SDK/network message from being ambiguous about who failed
+    return Response.json({ error: message, provider: activeProviderName() }, { status: 502 });
   }
 }

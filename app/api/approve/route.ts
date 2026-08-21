@@ -1,17 +1,14 @@
 import fs from "fs";
-import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { compileWithAutoFix, type FixFn } from "@/lib/compile";
 import { persistApplication, isValidReport, type PersistApplicationInput } from "@/lib/persist";
 import {
-  MODEL,
-  MAX_TOKENS,
   BASE_RESUME_PATH,
   WHITELIST_PATH,
   usingSampleResume,
   usingSampleWhitelist,
 } from "@/lib/config";
+import { getProvider, type ClaudeProvider } from "@/lib/provider";
 import { validateTailored, type Violation } from "@/lib/validator";
 
 // structured-output contract for the compile auto-fixer -- deliberately just `{ tex }`, distinct
@@ -19,42 +16,21 @@ import { validateTailored, type Violation } from "@/lib/validator";
 // needs a corrected document back.
 const FixTexSchema = z.object({ tex: z.string() });
 
-// same narrow duck-typed client shape as tailor.ts's ClaudeClient, so a fake can be injected
-// without constructing (or type-fighting with) the real Anthropic SDK client
-export interface FixClaudeClient {
-  messages: {
-    parse(params: {
-      model: string;
-      max_tokens: number;
-      system: string;
-      messages: { role: "user"; content: string }[];
-      output_config: { format: ReturnType<typeof zodOutputFormat<typeof FixTexSchema>> };
-    }): Promise<{ parsed_output: { tex: string } | null }>;
-  };
-}
-
-// builds the FixFn compileWithAutoFix expects, backed by whatever Claude client is passed in --
-// kept as its own factory (rather than inline in POST) so it's injectable in tests without
-// ever touching the network. No temperature/top_p/top_k, no assistant prefill: this model 400s on both.
-export function createFixFn(client: FixClaudeClient): FixFn {
+// builds the FixFn compileWithAutoFix expects, backed by whatever provider is passed in -- kept
+// as its own factory (rather than inline in POST) so it's injectable in tests without ever
+// touching the network or spawning the CLI
+export function createFixFn(provider: ClaudeProvider): FixFn {
   return async (tex: string, log: string): Promise<string> => {
-    const response = await client.messages.parse({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
+    const parsed = await provider({
       system: "You are an expert LaTeX debugger.",
-      messages: [
-        {
-          role: "user",
-          content: `The following LaTeX document failed to compile with tectonic. Return the corrected document only, changing as little as possible.\n\nCompile log:\n${log}\n\nLaTeX document:\n${tex}`,
-        },
-      ],
-      output_config: { format: zodOutputFormat(FixTexSchema) },
+      user: `The following LaTeX document failed to compile with tectonic. Return the corrected document only, changing as little as possible.\n\nCompile log:\n${log}\n\nLaTeX document:\n${tex}`,
+      schema: FixTexSchema,
     });
 
-    if (!response.parsed_output) {
+    if (!parsed) {
       throw new Error("Claude did not return a parseable fix");
     }
-    return response.parsed_output.tex;
+    return parsed.tex;
   };
 }
 
@@ -80,7 +56,7 @@ export interface ApprovePayload {
 }
 
 export interface ApproveDeps {
-  client?: FixClaudeClient; // inject a fake in tests; real Anthropic() constructed lazily otherwise
+  provider?: ClaudeProvider; // inject a fake in tests; the configured provider is built lazily otherwise
   baseTex?: string; // override the on-disk base resume (tests)
   whitelist?: string[]; // override the on-disk whitelist (tests)
   dataDir?: string; // forwarded to persistApplication (tests only) so nothing writes into real data/
@@ -126,10 +102,9 @@ export async function approve(payload: ApprovePayload, deps: ApproveDeps = {}): 
   // output via closure so, on success, we can re-validate (and, if clean, persist) the tex that
   // actually compiled
   const { result, usedFix } = await compileWithAutoFix(tex, async (currentTex, log) => {
-    // constructed lazily -- only reached if the first compile attempt actually failed, so a resume
-    // that compiles cleanly on the first try never requires ANTHROPIC_API_KEY to be set
-    const client = deps.client ?? (new Anthropic() as unknown as FixClaudeClient);
-    const fix = createFixFn(client);
+    // built lazily -- only reached if the first compile attempt actually failed, so a resume that
+    // compiles cleanly on the first try never needs an API key or a logged-in CLI
+    const fix = createFixFn(deps.provider ?? getProvider());
     fixedTex = await fix(currentTex, log);
     return fixedTex;
   });
