@@ -65,10 +65,19 @@ export async function PATCH(
     const application = updateApplication(id, patch);
     return Response.json({ application });
   } catch (err) {
-    // updateApplication throws a readable message on an invalid status or an unknown patch
-    // key (its column allow-list) -- both are client mistakes, so surface as 400 rather than
-    // letting the throw become an unhandled 500
     const message = err instanceof Error ? err.message : "Failed to update application";
-    return Response.json({ error: message }, { status: 400 });
+
+    // updateApplication throws exactly these readable messages for client mistakes: an invalid
+    // status value, or an unknown patch column (its allow-list). Match them narrowly by prefix --
+    // anything else (SQLITE_BUSY, a locked/corrupted db, disk I/O) is an infra problem and must
+    // not be mislabeled as a 400 the caller could have avoided.
+    if (message.startsWith("Invalid status ") || message.startsWith("Unknown field ")) {
+      return Response.json({ error: message }, { status: 400 });
+    }
+    // the row existed at the GET-then-check above but vanished before the update itself
+    if (message.endsWith("not found")) {
+      return Response.json({ error: message }, { status: 404 });
+    }
+    return Response.json({ error: "Failed to update application" }, { status: 500 });
   }
 }

@@ -2,7 +2,7 @@
 // hard, deterministic check (no LLM judgment) so a violation can be fed straight back to Claude
 // for a retry. Consumes stripLatex (Task 3) to compare/measure the visible text an ATS or human
 // would actually read, never the raw LaTeX source.
-import { stripLatex } from "./ats";
+import { stripLatex, expandWhitelist, stripTokenBoundaryPunctuation } from "./ats";
 
 export type Rule =
   | "removed-line"
@@ -178,25 +178,87 @@ export function checkRemovedLines(
   return violations;
 }
 
-// bullet-too-long: the visible (LaTeX-stripped) text of every bullet in the tailored resume must
-// be at most 200 characters, so tailoring can't quietly balloon a bullet past what a one-page
-// template can hold
+// bullet-too-long: the visible (LaTeX-stripped) text of a bullet must be at most 200 characters
+// UNLESS it was already over that limit in the base resume -- the system prompt forbids Claude
+// from ever shortening an existing line, so a pre-existing over-length bullet must be grandfathered
+// rather than flagged forever (an unfixable violation would just burn every retry). Bullets are
+// matched to their base counterpart by position (i-th bullet in document order): only a bullet
+// that is BOTH over the limit AND longer than what it started as counts as tailoring's fault.
 export function checkBulletTooLong(
+  baseTex: string,
   tailoredTex: string,
   options: ValidatorOptions = {}
 ): Violation[] {
   const bulletMacro = options.bulletMacro ?? DEFAULT_BULLET_MACRO;
   const violations: Violation[] = [];
 
-  for (const inv of findMacroInvocations(tailoredTex, bulletMacro)) {
+  const baseBulletLengths = findMacroInvocations(baseTex, bulletMacro).map(
+    (inv) => stripLatex(inv.content).length
+  );
+
+  findMacroInvocations(tailoredTex, bulletMacro).forEach((inv, i) => {
     const visibleText = stripLatex(inv.content);
-    if (visibleText.length > MAX_BULLET_LENGTH) {
+    if (visibleText.length <= MAX_BULLET_LENGTH) return;
+
+    const baseLength = baseBulletLengths[i];
+    if (baseLength !== undefined && visibleText.length <= baseLength) return; // grandfathered
+
+    violations.push({
+      rule: "bullet-too-long",
+      message:
+        `Bullet is ${visibleText.length} characters (max ${MAX_BULLET_LENGTH}): ` +
+        `"${visibleText.slice(0, 80)}${visibleText.length > 80 ? "..." : ""}"`,
+      line: lineNumberAt(tailoredTex, inv.start),
+    });
+  });
+
+  return violations;
+}
+
+// unescaped-percent: a `%` compiles as "start LaTeX comment" unless escaped as `\%`, so any
+// unescaped `%` mid-line (e.g. "reduced latency by 30%") would silently swallow the rest of that
+// line when the resume is compiled. A prior version exempted any "%" preceded by whitespace to
+// stop legitimate trailing comments in the (never-edited) preamble from being flagged -- but that
+// exemption is a false-negative hole: "30 % across services" is exactly the shape a real resume
+// bullet takes ("reduced X by 30 % across Y"), and it silently truncated the rest of the bullet in
+// the compiled PDF with no compile error. The fix scopes the check to content Claude actually
+// rewrites (bullet/item bodies, the same regions signal C in checkNonWhitelistedKeyword covers) --
+// preamble/template scaffolding is never touched by tailoring (checkRemovedLines already guards
+// structural changes elsewhere), so it doesn't need percent-checking, and within an editable body
+// there is no such thing as a "deliberate" unescaped percent: every one is a defect.
+export function checkUnescapedPercent(
+  tailoredTex: string,
+  options: ValidatorOptions = {}
+): Violation[] {
+  const bulletMacro = options.bulletMacro ?? DEFAULT_BULLET_MACRO;
+  const violations: Violation[] = [];
+  const lines = tailoredTex.split("\n");
+  const flaggedLines = new Set<number>();
+
+  // same two regions signal C scans: the bullet macro plus plain `\item{...}` bodies (the
+  // Technical Skills section uses `\item`, not `\resumeItem`)
+  const invocations = [
+    ...findMacroInvocations(tailoredTex, bulletMacro),
+    ...findMacroInvocations(tailoredTex, "item"),
+  ];
+
+  for (const inv of invocations) {
+    // MacroInvocation doesn't track content's own start offset, only `end` (just after the
+    // closing brace) and `content` itself -- derive it: content occupies
+    // [contentStart, end - 1), so contentStart = end - 1 - content.length
+    const contentStart = inv.end - 1 - inv.content.length;
+
+    for (let i = 0; i < inv.content.length; i++) {
+      if (inv.content[i] !== "%") continue;
+      if (inv.content[i - 1] === "\\") continue; // escaped -- safe
+
+      const lineNo = lineNumberAt(tailoredTex, contentStart + i);
+      if (flaggedLines.has(lineNo)) continue; // one flag per offending line is enough to drive a retry
+      flaggedLines.add(lineNo);
       violations.push({
-        rule: "bullet-too-long",
-        message:
-          `Bullet is ${visibleText.length} characters (max ${MAX_BULLET_LENGTH}): ` +
-          `"${visibleText.slice(0, 80)}${visibleText.length > 80 ? "..." : ""}"`,
-        line: lineNumberAt(tailoredTex, inv.start),
+        rule: "unescaped-percent",
+        message: `Unescaped "%" on line ${lineNo}: "${(lines[lineNo - 1] ?? "").trim()}"`,
+        line: lineNo,
       });
     }
   }
@@ -204,35 +266,14 @@ export function checkBulletTooLong(
   return violations;
 }
 
-// unescaped-percent: a `%` compiles as "start LaTeX comment" unless escaped as `\%`, so any
-// unescaped `%` mid-line (e.g. "reduced latency by 30%") would silently swallow the rest of that
-// line when the resume is compiled. A `%` that is the first non-whitespace character on its line
-// is a deliberate full-line comment and is allowed
-export function checkUnescapedPercent(tailoredTex: string): Violation[] {
-  const violations: Violation[] = [];
-  const lines = tailoredTex.split("\n");
-
-  lines.forEach((line, idx) => {
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] !== "%") continue;
-      if (line[i - 1] === "\\") continue; // escaped -- safe
-      if (line.slice(0, i).trim() === "") continue; // full-line comment -- safe
-      violations.push({
-        rule: "unescaped-percent",
-        message: `Unescaped "%" on line ${idx + 1}: "${line.trim()}"`,
-        line: idx + 1,
-      });
-      break; // one flag per offending line is enough to drive a retry
-    }
-  });
-
-  return violations;
-}
-
 // tech-name-shaped tokens: letters/digits plus embedded '.', '+', '#' so names like "Node.js",
-// "C++", "C#" survive as one token instead of being split apart
+// "C++", "C#" survive as one token instead of being split apart. The boundary-punctuation strip
+// afterward is what makes "...and GitHub Actions." tokenize as "Actions" rather than "Actions." --
+// without it, a bullet ending in a tech name (extremely common resume phrasing) reads as a
+// different, unknown term than the same whitelist entry appearing mid-sentence.
 function tokenizeRaw(text: string): string[] {
-  return text.match(/[A-Za-z0-9][A-Za-z0-9+#.]*/g) || [];
+  const raw = text.match(/[A-Za-z0-9][A-Za-z0-9+#.]*/g) || [];
+  return raw.map(stripTokenBoundaryPunctuation).filter(Boolean);
 }
 
 // closed set of common resume-bullet opener verbs (past tense + gerund) -- the ONLY reason a
@@ -331,16 +372,27 @@ export function checkNonWhitelistedKeyword(
 ): Violation[] {
   const bulletMacro = options.bulletMacro ?? DEFAULT_BULLET_MACRO;
   const baseTokensLower = new Set(tokenizeRaw(stripLatex(baseTex)).map((t) => t.toLowerCase()));
-  const whitelistLower = new Set(whitelist.map((w) => w.toLowerCase()));
+  // expand whitelist entries into both the whole phrase AND its individual words (shared with
+  // ats.ts's buildReport) -- a single-token comparison otherwise flags every word of a multi-word
+  // whitelisted skill ("React Native" whitelisted still flags "React" and "Native" separately)
+  const whitelistLower = expandWhitelist(whitelist);
+
+  // strip `%` comments before scanning the tailored tex for macro invocations (signals A/C below).
+  // findMacroInvocations is a plain regex/brace scan with no comment awareness, so without this a
+  // macro sitting inside a commented-out (dead) line -- e.g. the template's commented-out MIT
+  // attribution header -- still gets matched as if it were live content. The base token set (built
+  // through stripLatex, which already strips comments) never sees that same dead text, so the
+  // asymmetry made an unmodified resume's own boilerplate comments look like new fabricated terms.
+  const tailoredTexNoComments = tailoredTex.replace(/(?<!\\)%.*$/gm, "");
 
   // signal A: terms the tailored resume bolds
-  const boldedTokens = findMacroInvocations(tailoredTex, "textbf").flatMap((inv) =>
+  const boldedTokens = findMacroInvocations(tailoredTexNoComments, "textbf").flatMap((inv) =>
     tokenizeRaw(stripLatex(inv.content))
   );
 
   // signal B: tokens anywhere in the visible text that are unambiguously tech-shaped regardless
   // of bolding (digit, embedded dot, or an all-caps acronym)
-  const shapeSignalTokens = tokenizeRaw(stripLatex(tailoredTex)).filter((token) => {
+  const shapeSignalTokens = tokenizeRaw(stripLatex(tailoredTexNoComments)).filter((token) => {
     const hasLetter = /[A-Za-z]/.test(token);
     const isAllCapsAcronym = hasLetter && token === token.toUpperCase() && token.length >= 2;
     return /\d/.test(token) || token.includes(".") || isAllCapsAcronym;
@@ -351,19 +403,25 @@ export function checkNonWhitelistedKeyword(
   // introduced as plain prose (no bolding, no digits/dots/all-caps), including when the fabricated
   // term itself opens a bullet or a later sentence. Splitting on ". "/"! "/"? " scopes the opener
   // exemption to each sentence's own first word, not just the bullet's very first word.
-  const capitalizedMidSentenceTokens = findMacroInvocations(tailoredTex, bulletMacro).flatMap(
-    (inv) => {
-      const sentences = stripLatex(inv.content).split(/(?<=[.!?])\s+/);
-      return sentences.flatMap((sentence) =>
-        tokenizeRaw(sentence).filter((token, i) => {
-          if (!/^[A-Z]/.test(token)) return false;
-          // narrow, explicit exemption -- position alone is never sufficient (see rationale above)
-          if (i === 0 && RESUME_BULLET_OPENERS.has(token.toLowerCase())) return false;
-          return true;
-        })
-      );
-    }
-  );
+  //
+  // Scoped over both the bullet macro AND plain `\item` bodies: the real template's Technical
+  // Skills section is a single `\item{...}` (not `\resumeItem{...}`), with each skill name sitting
+  // in an unbolded second brace group (`\textbf{Category}{: Python, Java, ...}`) -- bulletMacro
+  // alone would never see that section at all, leaving injected skills there undetectable.
+  const capitalizedMidSentenceTokens = [
+    ...findMacroInvocations(tailoredTexNoComments, bulletMacro),
+    ...findMacroInvocations(tailoredTexNoComments, "item"),
+  ].flatMap((inv) => {
+    const sentences = stripLatex(inv.content).split(/(?<=[.!?])\s+/);
+    return sentences.flatMap((sentence) =>
+      tokenizeRaw(sentence).filter((token, i) => {
+        if (!/^[A-Z]/.test(token)) return false;
+        // narrow, explicit exemption -- position alone is never sufficient (see rationale above)
+        if (i === 0 && RESUME_BULLET_OPENERS.has(token.toLowerCase())) return false;
+        return true;
+      })
+    );
+  });
 
   const violations: Violation[] = [];
   const flagged = new Set<string>();
@@ -395,8 +453,8 @@ export function validateTailored(
 ): Violation[] {
   return [
     ...checkRemovedLines(baseTex, tailoredTex, options),
-    ...checkBulletTooLong(tailoredTex, options),
-    ...checkUnescapedPercent(tailoredTex),
+    ...checkBulletTooLong(baseTex, tailoredTex, options),
+    ...checkUnescapedPercent(tailoredTex, options),
     ...checkNonWhitelistedKeyword(baseTex, tailoredTex, whitelist, options),
   ];
 }

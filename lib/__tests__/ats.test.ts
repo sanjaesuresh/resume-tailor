@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildReport, extractKeywords, stripLatex } from "../ats";
+import {
+  buildReport,
+  expandWhitelist,
+  extractKeywords,
+  stripLatex,
+  stripTokenBoundaryPunctuation,
+} from "../ats";
 
 describe("extractKeywords", () => {
   it("finds tech keywords and known multi-word phrases while dropping stopwords", () => {
@@ -74,6 +80,55 @@ describe("stripLatex", () => {
     expect(text).not.toContain("{");
     expect(text).not.toContain("}");
   });
+
+  // regression test: adjacent brace groups (a URL arg immediately followed by a bolded title arg,
+  // the real template's `\href{url}{\textbf{Title}}` link convention) must not fuse into one glued
+  // token once the braces are stripped -- that hid real project/skill names from the token set
+  it("does not fuse adjacent brace groups from nested macros (href + textbf)", () => {
+    const tex = String.raw`\href{https://x.com/foo}{\textbf{FooBar}}`;
+
+    const text = stripLatex(tex);
+    const tokens = text.split(/\s+/).filter(Boolean);
+
+    expect(tokens).toContain("FooBar");
+    expect(tokens.some((t) => t.endsWith("x.com/foo"))).toBe(true);
+    expect(text).not.toContain("fooFooBar");
+  });
+});
+
+describe("expandWhitelist", () => {
+  it("includes both the whole phrase and its individual words, lowercased", () => {
+    const set = expandWhitelist(["React Native", "Test-Driven Development (TDD)"]);
+
+    expect(set.has("react native")).toBe(true);
+    expect(set.has("react")).toBe(true);
+    expect(set.has("native")).toBe(true);
+    expect(set.has("tdd")).toBe(true);
+  });
+
+  // regression test: a whitelist entry with a stray trailing "." (e.g. copy-pasted from prose)
+  // must still normalize to the same whole-phrase key a bare token would produce
+  it("strips a stray trailing period from a whitelist entry", () => {
+    const set = expandWhitelist(["GitHub Actions."]);
+
+    expect(set.has("github actions.")).toBe(false);
+    expect(set.has("github actions")).toBe(true);
+  });
+});
+
+describe("stripTokenBoundaryPunctuation", () => {
+  it("strips trailing sentence punctuation but keeps internal punctuation", () => {
+    expect(stripTokenBoundaryPunctuation("Actions.")).toBe("Actions");
+    expect(stripTokenBoundaryPunctuation("Terraform,")).toBe("Terraform");
+    expect(stripTokenBoundaryPunctuation("Node.js")).toBe("Node.js");
+    expect(stripTokenBoundaryPunctuation("C++")).toBe("C++");
+    expect(stripTokenBoundaryPunctuation("C#")).toBe("C#");
+  });
+
+  it("strips a leading wrapping paren but keeps a leading dot (.NET)", () => {
+    expect(stripTokenBoundaryPunctuation("(TDD)")).toBe("TDD");
+    expect(stripTokenBoundaryPunctuation(".NET")).toBe(".NET");
+  });
 });
 
 describe("buildReport", () => {
@@ -97,5 +152,23 @@ describe("buildReport", () => {
     expect(report.missing).toContain("docker");
     expect(report.missingNotClaimable).toContain("docker");
     expect(report.missingNotClaimable).not.toContain("kubernetes");
+  });
+
+  // B2: any keyword newly matched in the tailored text that isn't backed by the whitelist is a
+  // fabrication by definition, regardless of which macro/signal hid it -- this is the whole-text,
+  // macro-agnostic backstop for the validator's per-macro signals (which the Technical Skills
+  // section's unbolded second brace group can slip past entirely)
+  it("flags an injected off-whitelist keyword in fabricatedAdded and stays empty for a legit whitelisted one", () => {
+    const jd = "This role requires strong Kubernetes and Terraform skills.";
+    const baseTex = String.raw`\resumeItem{Built backend services using \textbf{Python}}`;
+    const tailoredTex = String.raw`\resumeItem{Built backend services using \textbf{Python}, \textbf{Kubernetes}, and \textbf{Terraform}}`;
+
+    // Kubernetes is whitelisted (genuinely claimable); Terraform is not -- it must be caught
+    const whitelist = ["python", "kubernetes"];
+
+    const report = buildReport(jd, baseTex, tailoredTex, whitelist);
+
+    expect(report.fabricatedAdded).toContain("terraform");
+    expect(report.fabricatedAdded).not.toContain("kubernetes");
   });
 });

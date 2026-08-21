@@ -147,13 +147,70 @@ export type ScrapeResult =
   | { ok: true; description: string }
   | { ok: false; error: string };
 
+// only http/https job-posting URLs are ever legitimate; anything else (file:, data:, gopher:, ...)
+// has no business being fetched server-side on a caller's behalf
+const ALLOWED_SCHEMES = new Set(["http:", "https:"]);
+
+// this is a server-side fetch of a client-supplied URL: without a host check, a caller can point
+// it at cloud-metadata endpoints (169.254.169.254) or anything on localhost/the private network
+// and have the response body handed straight back to them (SSRF). The WHATWG URL parser already
+// canonicalizes obfuscated IPv4 forms (hex/octal/decimal, e.g. "0x7f.0.0.1" -> "127.0.0.1") into
+// dotted-decimal, so checking `hostname` after `new URL()` catches those for free.
+function isPrivateOrLoopbackIPv4(hostname: string): boolean {
+  const match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!match) return false;
+  const octets = match.slice(1, 5).map(Number);
+  if (octets.some((o) => o > 255)) return false; // not actually a valid IPv4 literal
+
+  const [a, b] = octets;
+  if (a === 127) return true; // 127.0.0.0/8 loopback
+  if (a === 10) return true; // 10.0.0.0/8 private
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 private
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16 private
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local (covers cloud metadata)
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 carrier-grade NAT
+  if (a === 0) return true; // 0.0.0.0/8 "this network"
+  return false;
+}
+
+function isPrivateOrLoopbackIPv6(hostname: string): boolean {
+  // URL#hostname keeps IPv6 literals bracketed and lowercased, e.g. "[::1]"
+  if (!hostname.startsWith("[") || !hostname.endsWith("]")) return false;
+  const addr = hostname.slice(1, -1);
+  if (addr === "::1" || addr === "::") return true; // loopback / unspecified
+  if (addr.startsWith("fe80:")) return true; // fe80::/10 link-local
+  if (addr.startsWith("fc") || addr.startsWith("fd")) return true; // fc00::/7 unique local
+  return false;
+}
+
+function isBlockedHost(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  if (lower === "localhost" || lower.endsWith(".localhost")) return true;
+  return isPrivateOrLoopbackIPv4(lower) || isPrivateOrLoopbackIPv6(lower);
+}
+
 /**
  * Fetches a job posting URL with a desktop User-Agent and a 15s timeout, then runs
- * extractDescription on the response body. Network errors, non-2xx responses, and
- * too-short extractions all surface as `{ ok: false, error }` with a human-readable reason
- * so the API route (and eventually the UI) can fall back to a manual paste box.
+ * extractDescription on the response body. Invalid/non-http(s) URLs, private/loopback/link-local
+ * hosts, network errors, non-2xx responses, and too-short extractions all surface as
+ * `{ ok: false, error }` with a human-readable reason so the API route (and eventually the UI)
+ * can fall back to a manual paste box.
  */
 export async function scrapeJob(url: string): Promise<ScrapeResult> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, error: "Invalid URL" };
+  }
+
+  if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
+    return { ok: false, error: `Unsupported URL scheme "${parsed.protocol}" -- only http/https URLs can be fetched` };
+  }
+  if (isBlockedHost(parsed.hostname)) {
+    return { ok: false, error: "This URL points to a private, loopback, or link-local address and cannot be fetched" };
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 

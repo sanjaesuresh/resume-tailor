@@ -1,8 +1,12 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import { persistApplication, isValidReport } from "../persist";
+import { ASSETS_DIR } from "../config";
+// "@/" aliased import -- only resolvable now that vitest.config.ts maps it to the project root;
+// this import failing to load at all is the regression guard for that alias's absence
+import { approve, type FixClaudeClient } from "@/app/api/approve/route";
 
 // each test gets its own temp data dir so persisted files/db never touch the real data/ directory
 function tempDataDir(): string {
@@ -236,5 +240,177 @@ describe("isValidReport", () => {
   it("accepts a plain object", () => {
     expect(isValidReport({ scoreBefore: 10, scoreAfter: 90 })).toBe(true);
     expect(isValidReport({})).toBe(true);
+  });
+});
+
+// real, known-compilable document (same fixture compile.test.ts uses) so these tests exercise the
+// actual tectonic binary, not a mock -- B4's bug is specifically about what happens to the tex that
+// *actually compiled*, which only means something against a real compile
+const SAMPLE_TEX_PATH = path.join(ASSETS_DIR, "base-resume.sample.tex");
+const validTex = fs.readFileSync(SAMPLE_TEX_PATH, "utf-8");
+
+// builds a fake FixClaudeClient whose messages.parse always resolves to the given fixed tex --
+// lets tests script the auto-fixer's output without ever touching the network
+function fakeFixClient(fixedTex: string): FixClaudeClient {
+  return {
+    messages: {
+      parse: vi.fn().mockResolvedValue({ parsed_output: { tex: fixedTex } }),
+    },
+  };
+}
+
+describe("approve (B4: auto-fixed tex is re-validated, not trusted blindly)", () => {
+  it(
+    "persists on a first-try clean compile without ever constructing a fix client (H2 laziness)",
+    async () => {
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "resume-tailor-approve-"));
+      try {
+        // deps.client deliberately omitted: if compileWithAutoFix's fixFn closure were ever
+        // invoked on a first-try success, this would be the only place that could construct a
+        // real `new Anthropic()` -- proving it's never reached is what proves the lazy fix
+        const response = await approve(
+          { tex: validTex, company: "Acme", role: "Engineer", report: { scoreBefore: 10, scoreAfter: 50 } },
+          { dataDir }
+        );
+
+        expect(response.status).toBe(200);
+        if (response.status === 200) {
+          expect(response.body.application.company).toBe("Acme");
+        }
+      } finally {
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      }
+    },
+    30000
+  );
+
+  it(
+    "rejects (422) and does not persist when the auto-fixer's output introduces a new fabrication violation",
+    async () => {
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "resume-tailor-approve-"));
+      try {
+        // the "approved draft" the user reviewed: valid at the validator level (same sections/
+        // bullets/keywords as baseTex) but fails to compile -- an unterminated \begin{verbatim}
+        // right before \end{document} is a fast, reliable tectonic failure
+        const approvedTex = validTex.replace(
+          "\\end{document}",
+          "\\begin{verbatim}\n\\end{document}"
+        );
+        expect(approvedTex).not.toBe(validTex);
+
+        // the fixer's output: compiles fine, but smuggles in a bolded, non-whitelisted term
+        // ("Rust") that isn't anywhere in the base resume -- exactly the fabrication B4 exists to catch
+        const fixedTex = validTex.replace(
+          "Optimized \\textbf{REST APIs} and validation layers",
+          "Optimized \\textbf{REST APIs} and \\textbf{Rust} validation layers"
+        );
+        expect(fixedTex).not.toBe(validTex);
+
+        const client = fakeFixClient(fixedTex);
+
+        const response = await approve(
+          { tex: approvedTex, company: "Acme", role: "Engineer", report: { scoreBefore: 10, scoreAfter: 50 } },
+          { client, baseTex: validTex, whitelist: [], dataDir }
+        );
+
+        expect(response.status).toBe(422);
+        if (response.status === 422) {
+          expect(response.body.error).toMatch(/no-fabrication|no-shrink/i);
+          expect(response.body.tex).toBe(fixedTex);
+          expect(response.body.violations?.some((v) => v.rule === "non-whitelisted-keyword")).toBe(
+            true
+          );
+        }
+
+        // the whole point: a rejected auto-fix must never reach disk
+        expect(fs.existsSync(path.join(dataDir, "applications"))).toBe(false);
+      } finally {
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      }
+    },
+    30000
+  );
+
+  it(
+    "persists and marks the report autoFixed when the fixer's output introduces no new violations",
+    async () => {
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "resume-tailor-approve-"));
+      try {
+        const approvedTex = validTex.replace(
+          "\\end{document}",
+          "\\begin{verbatim}\n\\end{document}"
+        );
+        // the fixer just removes the broken tail, changing nothing else -- clean relative to the
+        // approved draft, so this must be allowed to save
+        const client = fakeFixClient(validTex);
+
+        const response = await approve(
+          { tex: approvedTex, company: "Acme", role: "Engineer", report: { scoreBefore: 10, scoreAfter: 50 } },
+          { client, baseTex: validTex, whitelist: [], dataDir }
+        );
+
+        expect(response.status).toBe(200);
+        if (response.status === 200) {
+          expect(response.body.application.atsReport).toMatchObject({ autoFixed: true });
+        }
+      } finally {
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      }
+    },
+    30000
+  );
+});
+
+describe("persistApplication (H3: concurrent same-slug claims never delete each other's files)", () => {
+  const FIXED_DATE = new Date(2026, 0, 15);
+
+  it("a second call racing for the same slug claims -2 and, if it then fails, removes only its own directory", () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "resume-tailor-persist-race-"));
+    try {
+      // first caller: succeeds normally, claims the base slug
+      const first = persistApplication({
+        tex: "\\documentclass{article}\\begin{document}first\\end{document}",
+        pdf: Buffer.from("%PDF-first"),
+        company: "Stripe",
+        role: "Engineer",
+        report: { scoreBefore: 1, scoreAfter: 2 },
+        dataDir,
+        now: FIXED_DATE,
+      });
+      const firstAppDir = path.dirname(first.texPath!);
+      expect(fs.existsSync(firstAppDir)).toBe(true);
+
+      // second caller targets the identical company/role/date (the real race this guards
+      // against), but is given a circular report so its own write fails partway through --
+      // before the fix, the old existsSync-then-mkdirSync(recursive:true) pattern could let a
+      // failure like this rmSync the FIRST caller's directory instead of its own
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+
+      expect(() =>
+        persistApplication({
+          tex: "\\documentclass{article}\\begin{document}second\\end{document}",
+          pdf: Buffer.from("%PDF-second"),
+          company: "Stripe",
+          role: "Engineer",
+          report: circular,
+          dataDir,
+          now: FIXED_DATE,
+        })
+      ).toThrow();
+
+      // the first application's directory and files must survive completely untouched
+      expect(fs.existsSync(firstAppDir)).toBe(true);
+      expect(fs.readFileSync(first.texPath!, "utf-8")).toBe(
+        "\\documentclass{article}\\begin{document}first\\end{document}"
+      );
+
+      // the second caller's own claimed directory (the "-2" suffix) is the one that got cleaned up
+      const applicationsDir = path.join(dataDir, "applications");
+      const remaining = fs.readdirSync(applicationsDir);
+      expect(remaining).toEqual([path.basename(firstAppDir)]);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });

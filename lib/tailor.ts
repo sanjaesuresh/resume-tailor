@@ -77,7 +77,7 @@ Follow these rules exactly:
 - Rearranging work highlights (the order of bullet points within a job) is allowed.
 - Modify key technologies mentioned in bullet points to match the job description.
 - Do not add a summary section.
-- Every bullet point has a hard limit of 200 characters, including spaces.
+- Keep every bullet point at or under 200 characters (including spaces) where it already is. Never make an existing bullet point longer than it already was.
 - Any literal "%" character must be written as "\\%" (an unescaped "%" starts a LaTeX comment and breaks compilation).
 - Add every job-description keyword you can truthfully add, to maximize ATS keyword match.
 

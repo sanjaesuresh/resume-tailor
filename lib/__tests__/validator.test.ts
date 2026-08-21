@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import fs from "fs";
+import path from "path";
 import {
   checkBulletTooLong,
   checkNonWhitelistedKeyword,
@@ -6,6 +8,25 @@ import {
   checkUnescapedPercent,
   validateTailored,
 } from "../validator";
+
+// mirrors lib/tailor.ts's own whitelist-markdown parsing so this test exercises the real
+// committed sample assets exactly as the app would load them, not a hand-rolled fixture list
+function parseWhitelistMarkdown(markdown: string): string[] {
+  return markdown
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !line.startsWith("#"))
+    .filter((line) => line.split(/\s+/).length <= 6);
+}
+
+const sampleResumeTex = fs.readFileSync(
+  path.join(process.cwd(), "assets", "base-resume.sample.tex"),
+  "utf-8"
+);
+const sampleWhitelist = parseWhitelistMarkdown(
+  fs.readFileSync(path.join(process.cwd(), "assets", "skills-whitelist.sample.md"), "utf-8")
+);
 
 // base fixture: 2 experience blocks of 3 bullets each, using the REAL template macros
 // (\resumeItem, \section) so the default option values are exercised, not just simplified fixtures
@@ -104,7 +125,7 @@ describe("checkBulletTooLong", () => {
     const tailoredTex = `\\section{Experience}\n\\resumeItem{${longBullet}}\n`;
     const expectedLine = tailoredTex.split("\n").findIndex((l) => l.includes(longBullet)) + 1;
 
-    const violations = checkBulletTooLong(tailoredTex);
+    const violations = checkBulletTooLong("", tailoredTex);
 
     expect(violations).toHaveLength(1);
     expect(violations[0].rule).toBe("bullet-too-long");
@@ -115,7 +136,7 @@ describe("checkBulletTooLong", () => {
     const okBullet = "A".repeat(200);
     const tailoredTex = `\\resumeItem{${okBullet}}`;
 
-    const violations = checkBulletTooLong(tailoredTex);
+    const violations = checkBulletTooLong("", tailoredTex);
 
     expect(violations).toHaveLength(0);
   });
@@ -124,7 +145,7 @@ describe("checkBulletTooLong", () => {
     const boundaryBullet = "A".repeat(201);
     const tailoredTex = `\\resumeItem{${boundaryBullet}}`;
 
-    const violations = checkBulletTooLong(tailoredTex);
+    const violations = checkBulletTooLong("", tailoredTex);
 
     expect(violations).toHaveLength(1);
     expect(violations[0].rule).toBe("bullet-too-long");
@@ -133,9 +154,34 @@ describe("checkBulletTooLong", () => {
   it("supports a simplified fixture via the bulletMacro option", () => {
     const tailoredTex = `\\item{${"B".repeat(210)}}`;
 
-    const violations = checkBulletTooLong(tailoredTex, { bulletMacro: "item" });
+    const violations = checkBulletTooLong("", tailoredTex, { bulletMacro: "item" });
 
     expect(violations).toHaveLength(1);
+  });
+
+  // regression test for the round-2 defect: the rule never compared against the base resume, so
+  // a bullet that was ALREADY over 200 characters before tailoring touched it became a permanent,
+  // unfixable violation (the system prompt separately forbids ever shortening an existing line)
+  it("grandfathers a bullet that was already over 200 characters in the base resume", () => {
+    const longBullet = "A".repeat(220);
+    const baseTex = `\\resumeItem{${longBullet}}`;
+    const tailoredTex = `\\resumeItem{${longBullet}}`; // unchanged
+
+    const violations = checkBulletTooLong(baseTex, tailoredTex);
+
+    expect(violations).toHaveLength(0);
+  });
+
+  it("still flags an already-over-length bullet if tailoring makes it even longer", () => {
+    const baseBullet = "A".repeat(220);
+    const longerBullet = "A".repeat(240);
+    const baseTex = `\\resumeItem{${baseBullet}}`;
+    const tailoredTex = `\\resumeItem{${longerBullet}}`;
+
+    const violations = checkBulletTooLong(baseTex, tailoredTex);
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe("bullet-too-long");
   });
 });
 
@@ -150,6 +196,20 @@ describe("checkUnescapedPercent", () => {
     expect(violations[0].line).toBe(1);
   });
 
+  // regression test: a prior version exempted any "%" preceded by whitespace, which was meant to
+  // spare legitimate trailing preamble comments but also swallowed exactly the phrasing a real
+  // resume bullet uses ("reduced X by 30 % across Y") -- LaTeX comments out "across services}"
+  // regardless of what precedes the "%", so this silently truncated the bullet with no compile
+  // error. Fails against the pre-fix implementation.
+  it("flags a percent preceded by whitespace inside a bullet body", () => {
+    const tex = String.raw`\resumeItem{Reduced deploy time by 30 % across services}`;
+
+    const violations = checkUnescapedPercent(tex);
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe("unescaped-percent");
+  });
+
   it("passes when the percent is escaped", () => {
     const tex = String.raw`\resumeItem{Improved by 30\% this quarter}`;
 
@@ -158,7 +218,17 @@ describe("checkUnescapedPercent", () => {
     expect(violations).toHaveLength(0);
   });
 
-  it("passes a full-line LaTeX comment (percent at start of line)", () => {
+  it("passes when the whitespace-preceded percent is escaped", () => {
+    const tex = String.raw`\resumeItem{Reduced deploy time by 30\% across services}`;
+
+    const violations = checkUnescapedPercent(tex);
+
+    expect(violations).toHaveLength(0);
+  });
+
+  // the check is scoped to bullet/item bodies -- a "%" anywhere else (preamble scaffolding,
+  // template comments) is never checked at all, since tailoring never rewrites that content
+  it("ignores a full-line LaTeX comment outside any bullet/item body", () => {
     const tex = "% this whole line is a comment\n\\resumeItem{Improved reliability}";
 
     const violations = checkUnescapedPercent(tex);
@@ -166,7 +236,19 @@ describe("checkUnescapedPercent", () => {
     expect(violations).toHaveLength(0);
   });
 
-  it("passes a comment line indented with leading whitespace", () => {
+  it("ignores a legitimate trailing comment and a full-line banner outside any bullet/item body", () => {
+    const tex = [
+      "\\fancyhf{} % clear all header and footer fields",
+      "%%%%%%%%%%%%%%%%%%",
+      "\\resumeItem{Improved reliability}",
+    ].join("\n");
+
+    const violations = checkUnescapedPercent(tex);
+
+    expect(violations).toHaveLength(0);
+  });
+
+  it("ignores a comment line indented with leading whitespace, outside any bullet/item body", () => {
     const tex = "   % indented comment\n\\resumeItem{Improved reliability}";
 
     const violations = checkUnescapedPercent(tex);
@@ -337,5 +419,111 @@ describe("validateTailored", () => {
     expect(rules).toContain("unescaped-percent");
     expect(rules).toContain("bullet-too-long");
     expect(rules).toContain("non-whitelisted-keyword");
+  });
+
+  // this is THE regression test: a whole-branch review ran the validator against the real resume
+  // for the first time and found it rejects an unmodified copy of itself (10-12 false-positive
+  // violations) -- every prior test used a 22-line synthetic fixture, which is why this shipped.
+  // An unmodified resume compared to itself must always be clean.
+  it("returns zero violations for the real committed sample resume compared to itself", () => {
+    const violations = validateTailored(sampleResumeTex, sampleResumeTex, sampleWhitelist);
+
+    expect(violations).toEqual([]);
+  });
+
+  // B2: skill names in the Technical Skills section sit in an unbolded second brace group inside
+  // a plain `\item`, not `\resumeItem` -- a fabricated term injected there must still be caught
+  it("flags a fabricated skill injected into the Technical Skills section", () => {
+    const tailoredTex = sampleResumeTex.replace(
+      "\\textbf{Cloud \\& DevOps}{: Docker, Kubernetes, GitHub Actions, AWS (EC2, Lambda, RDS, S3), Azure, GCP}",
+      "\\textbf{Cloud \\& DevOps}{: Docker, Kubernetes, GitHub Actions, AWS (EC2, Lambda, RDS, S3), Azure, GCP, Terraform, Ansible, Snowflake}"
+    );
+    expect(tailoredTex).not.toBe(sampleResumeTex); // guard against a silent no-op replace
+
+    const violations = checkNonWhitelistedKeyword(sampleResumeTex, tailoredTex, sampleWhitelist);
+
+    expect(
+      violations.some((v) => v.rule === "non-whitelisted-keyword" && /Terraform/.test(v.message))
+    ).toBe(true);
+  });
+
+  // B3: a multi-word whitelist entry ("React Native") must clear BOTH the whole phrase and each
+  // of its own words -- comparing whole phrases against single tokens made every multi-word entry
+  // an unfixable, guaranteed violation
+  it("does not flag a whitelisted multi-word skill (React Native)", () => {
+    const tailoredTex = String.raw`\resumeItem{Built mobile features with \textbf{React Native} for the iOS app}`;
+
+    const violations = checkNonWhitelistedKeyword(baseTex, tailoredTex, ["React Native"]);
+
+    expect(violations).toEqual([]);
+  });
+
+  // regression test for the trailing-punctuation false positive: "GitHub Actions." (sentence-
+  // ending period attached) must still match the whitelisted "GitHub Actions" -- fails pre-fix,
+  // where the period-attached token "actions." never matches the whitelist's "actions" component
+  it("does not flag a whitelisted term that ends a sentence with trailing punctuation", () => {
+    const tailoredTex = String.raw`\resumeItem{Built with \textbf{React Native} and GitHub Actions.}`;
+
+    const violations = checkNonWhitelistedKeyword(baseTex, tailoredTex, [
+      "React Native",
+      "GitHub Actions",
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  // same trailing-punctuation bug, but for a comma-separated skills list whose last item ends the
+  // sentence with a period (the Technical Skills section's actual shape)
+  it("does not flag whitelisted terms in a comma-separated list ending in a period", () => {
+    const tailoredTex = String.raw`\item{Built pipelines using Terraform, Ansible.}`;
+
+    const violations = checkNonWhitelistedKeyword(baseTex, tailoredTex, ["Terraform", "Ansible"], {
+      bulletMacro: "item",
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  // punctuation-bearing whitelist entries must still work end to end after the boundary-strip fix
+  // -- proves the fix only trims sentence/wrapping punctuation at the edges, not the internal
+  // punctuation that makes these terms what they are
+  it("still matches punctuation-bearing whitelist entries (Node.js, C++, CI/CD, .NET)", () => {
+    const tailoredTex = String.raw`\resumeItem{Built services with Node.js, C++, CI/CD, and .NET.}`;
+
+    const violations = checkNonWhitelistedKeyword(baseTex, tailoredTex, [
+      "Node.js",
+      "C++",
+      "CI/CD",
+      ".NET",
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  // ...and the same punctuation-bearing shapes must still be flagged when NOT whitelisted, proving
+  // the fix didn't neuter detection along with the false positive
+  it("still flags a punctuation-bearing term when it is not whitelisted", () => {
+    const tailoredTex = String.raw`\resumeItem{Built services with Node.js and C++.}`;
+
+    const violations = checkNonWhitelistedKeyword(baseTex, tailoredTex, ["Node.js"]);
+
+    expect(
+      violations.some((v) => v.rule === "non-whitelisted-keyword" && /C\+\+/.test(v.message))
+    ).toBe(true);
+  });
+
+  // re-assert the Technical Skills fabrication invariant still holds after the boundary-strip fix
+  it("still flags a fabricated skill injected into the Technical Skills section (re-check)", () => {
+    const tailoredTex = sampleResumeTex.replace(
+      "\\textbf{Cloud \\& DevOps}{: Docker, Kubernetes, GitHub Actions, AWS (EC2, Lambda, RDS, S3), Azure, GCP}",
+      "\\textbf{Cloud \\& DevOps}{: Docker, Kubernetes, GitHub Actions, AWS (EC2, Lambda, RDS, S3), Azure, GCP, Terraform}"
+    );
+    expect(tailoredTex).not.toBe(sampleResumeTex);
+
+    const violations = checkNonWhitelistedKeyword(sampleResumeTex, tailoredTex, sampleWhitelist);
+
+    expect(
+      violations.some((v) => v.rule === "non-whitelisted-keyword" && /Terraform/.test(v.message))
+    ).toBe(true);
   });
 });

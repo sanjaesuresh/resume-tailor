@@ -266,13 +266,18 @@ function isValidAtsReport(value: unknown): value is AtsReport {
     Array.isArray(r.matchedBefore) &&
     Array.isArray(r.matchedAfter) &&
     Array.isArray(r.missing) &&
-    Array.isArray(r.missingNotClaimable)
+    Array.isArray(r.missingNotClaimable) &&
+    Array.isArray(r.fabricatedAdded)
   );
 }
 
 export default function NewApplicationPage() {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [fieldErrors, setFieldErrors] = useState<{ company?: string; role?: string }>({});
+  // B2 fabrication gate: explicit user acknowledgement required before Approve is allowed when
+  // the report flags fabricatedAdded terms. Reset on every fresh tailor result (below) so an
+  // acknowledgement never silently carries over onto a different draft's fabricated terms.
+  const [fabricationAck, setFabricationAck] = useState(false);
 
   // guards against setState-via-dispatch after unmount (e.g. user navigates to "/" mid-request) --
   // the fetch itself isn't cancelled, but its result is discarded rather than dispatched
@@ -342,6 +347,9 @@ export default function NewApplicationPage() {
         // fresh tailor output replaces company/role, so a stale "required" error from a previous
         // approve attempt must not linger next to a now-valid field
         setFieldErrors({});
+        // a new draft may have different (or no) fabricated terms -- never carry a prior
+        // acknowledgement forward onto content the user hasn't seen yet
+        setFabricationAck(false);
         dispatch({
           type: "TAILOR_SUCCESS",
           data: {
@@ -377,6 +385,10 @@ export default function NewApplicationPage() {
   async function handleApprove() {
     if (state.stage !== "review") return;
     if (!validateBeforeApprove()) return;
+    // B2 fabrication gate: a fabricated skill must never sail through to compile/PDF silently --
+    // require an explicit acknowledgement first. The Approve button is also disabled for this
+    // same condition below; this is defense-in-depth, not the only guard.
+    if (state.report.fabricatedAdded.length > 0 && !fabricationAck) return;
     dispatch({ type: "APPROVE_START" });
     try {
       const res = await fetch("/api/approve", {
@@ -632,12 +644,30 @@ export default function NewApplicationPage() {
             </p>
           )}
 
+          {state.report.fabricatedAdded.length > 0 && (
+            // B2 fabrication gate: Approve stays disabled until this is checked, so a possible
+            // fabricated skill can never reach compile/PDF without the user actively confirming
+            // they've reviewed it (ReportCard renders the terms themselves as a hard warning above)
+            <div className="na-field na-fabrication-ack">
+              <label htmlFor="fabrication-ack">
+                <input
+                  id="fabrication-ack"
+                  type="checkbox"
+                  checked={fabricationAck}
+                  onChange={(e) => setFabricationAck(e.target.checked)}
+                />{" "}
+                I&apos;ve reviewed the possible fabricated skills flagged above and confirm I can
+                genuinely claim them, or will remove them before approving.
+              </label>
+            </div>
+          )}
+
           <div className="na-actions">
             <button
               type="button"
               className="na-btn na-btn--primary"
               onClick={handleApprove}
-              disabled={busy}
+              disabled={busy || (state.report.fabricatedAdded.length > 0 && !fabricationAck)}
             >
               {state.approveLoading ? "Compiling…" : "Approve & compile"}
             </button>

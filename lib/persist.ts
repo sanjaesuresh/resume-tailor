@@ -21,22 +21,36 @@ function formatYyyymmdd(date: Date): string {
   return `${yyyy}${mm}${dd}`;
 }
 
-// the only place slug collisions are resolved: if `<applicationsDir>/<slug>` already exists on
-// disk, append -2, -3, ... until a free directory name is found
-function buildSlug(
+// the only place slug collisions are resolved. Directory creation IS the claim: each candidate is
+// claimed with a non-recursive mkdirSync inside the loop, and EEXIST (another call already holds
+// that slug) advances to the next suffix -- this closes the TOCTOU window a separate
+// existsSync-then-mkdirSync pair would leave open between two concurrent callers targeting the
+// same company/role/date. Returns the directory this call actually created, so the caller can
+// safely remove exactly that directory (and only that one) on a later failure.
+function claimSlugDir(
   company: string,
   role: string,
   date: Date,
   applicationsDir: string
-): string {
+): { slug: string; appDir: string } {
   const base = `${slugifyPart(company)}-${slugifyPart(role)}-${formatYyyymmdd(date)}`;
   let candidate = base;
   let suffix = 2;
-  while (fs.existsSync(path.join(applicationsDir, candidate))) {
-    candidate = `${base}-${suffix}`;
-    suffix++;
+
+  for (;;) {
+    const appDir = path.join(applicationsDir, candidate);
+    try {
+      fs.mkdirSync(appDir, { recursive: false });
+      return { slug: candidate, appDir };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        candidate = `${base}-${suffix}`;
+        suffix++;
+        continue;
+      }
+      throw err;
+    }
   }
-  return candidate;
 }
 
 export interface PersistApplicationInput {
@@ -68,11 +82,11 @@ export function persistApplication(input: PersistApplicationInput): Application 
   const applicationsDir = path.join(dataDir, "applications");
   fs.mkdirSync(applicationsDir, { recursive: true });
 
-  const slug = buildSlug(input.company, input.role, now, applicationsDir);
-  const appDir = path.join(applicationsDir, slug);
-  // buildSlug only ever returns a candidate that didn't already exist on disk, so this call is
-  // always the sole creator of appDir -- safe to remove it wholesale in the catch below.
-  fs.mkdirSync(appDir, { recursive: true });
+  // claimSlugDir's mkdirSync succeeding IS the claim: this call is guaranteed to be the sole
+  // creator of appDir (a concurrent caller racing for the same slug gets EEXIST and moves on to
+  // the next suffix instead), so it's safe to remove appDir wholesale in the catch below without
+  // risking another application's already-persisted files.
+  const { appDir } = claimSlugDir(input.company, input.role, now, applicationsDir);
 
   try {
     const texPath = path.join(appDir, "resume.tex");

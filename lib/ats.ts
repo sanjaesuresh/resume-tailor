@@ -39,6 +39,21 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// boundary punctuation that can wrap a token/whitelist entry without being part of the term
+// itself: a trailing sentence-ending period/comma/semicolon/colon (e.g. "...and GitHub Actions.")
+// or closing paren, or a leading opening paren (e.g. an abbreviation gloss "(TDD)"). Stripped only
+// at the very edges, and repeatedly (in case of doubled-up punctuation like a period inside a
+// closing quote), so internal, meaning-bearing punctuation always survives: "Node.js"/"React.js"
+// keep their dot (it's not at either edge), "C++"/"C#" are untouched (those symbols aren't in this
+// strip set), "CI/CD" is untouched (the tokenizers below never produce a token with a trailing
+// slash), and ".NET" keeps its leading dot (the strip set's only leading char is "("). Shared by
+// both validator.ts's token path and this file's tokenize()/expandWhitelist so the two stay
+// symmetric -- a term normalized one way but not the other is exactly how the trailing-period bug
+// (a false "non-whitelisted-keyword" on any bullet ending in a tech name) happened in the first place.
+export function stripTokenBoundaryPunctuation(token: string): string {
+  return token.replace(/^\(+/, "").replace(/[.,;:)]+$/, "");
+}
+
 // custom boundary check instead of regex `\b`: tech terms often start/end with non-alphanumeric
 // chars (C++, CI/CD), and `\b` only fires at a word/non-word transition, so it would silently
 // fail to match "c++ " (both '+' and the following space are non-word chars, no transition)
@@ -55,9 +70,12 @@ function containsWord(text: string, phrase: string): boolean {
   return boundaryRegex(phrase).test(text);
 }
 
-// splits on tech-friendly word chars (keeps things like "c++", "node.js", "ci/cd" intact)
+// splits on tech-friendly word chars (keeps things like "c++", "node.js", "ci/cd" intact); the
+// boundary-punctuation strip afterward keeps a sentence-ending period out of the last word of a
+// JD sentence (e.g. "...built with Kubernetes." -> "kubernetes", not "kubernetes.")
 function tokenize(loweredText: string): string[] {
-  return loweredText.match(/[a-z0-9][a-z0-9+#./-]*/g) || [];
+  const raw = loweredText.match(/[a-z0-9][a-z0-9+#./-]*/g) || [];
+  return raw.map(stripTokenBoundaryPunctuation).filter(Boolean);
 }
 
 /**
@@ -169,8 +187,13 @@ export function stripLatex(tex: string): string {
   // [optional] arg, but leave the following {argument} braces/text for the next step
   text = text.replace(/\\[a-zA-Z]+\*?(\[[^\]]*\])?/g, "");
 
-  // braces are now just grouping, not content -- drop them, keep the text they wrapped
-  text = text.replace(/[{}]/g, "");
+  // braces are now just grouping, not content -- drop them, but replace with a SPACE rather than
+  // deleting outright: adjacent brace groups (e.g. `\href{https://x.com/foo}{\textbf{FooBar}}`,
+  // where the URL and the bolded title are two separate {..} groups back to back with nothing
+  // between them) would otherwise fuse into one glued token ("x.com/fooFooBar") once the braces
+  // vanish, hiding a real project/skill name from the token set entirely. The whitespace-collapse
+  // step right below cleans up any doubled-up spaces this introduces.
+  text = text.replace(/[{}]/g, " ");
 
   // collapse line-continuation "\\" and clean up any stray backslashes left over
   text = text.replace(/\\\\/g, " ").replace(/\\/g, "");
@@ -189,6 +212,35 @@ export interface AtsReport {
   scoreAfter: number;
   missing: string[];
   missingNotClaimable: string[];
+  fabricatedAdded: string[];
+}
+
+// splits a whitelist phrase into its individual word components on any run of non-alphanumeric
+// characters -- deliberately broader than the tech-shaped tokenizers used elsewhere (tokenize/
+// tokenizeRaw), since a whitelist entry like "React.js" or "Test-Driven Development (TDD)" must
+// also match a bare mention of just "react", "js", or "TDD", not only the exact full phrase
+function whitelistComponents(phrase: string): string[] {
+  return phrase.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+// expands a whitelist of skill phrases into a lookup set containing BOTH each whole phrase
+// (lowercased) and every individual word it's made of. Without the component expansion, whitelisting
+// a multi-word skill ("Amazon Web Services") still leaves each of its own words ("Amazon", "Web")
+// looking unrecognized to any check that compares single tokens/keywords -- an unfixable retry loop
+// in the validator, and a false "not on your whitelist" in this report. Exported so validator.ts's
+// single-token whitelist check (which has the identical bug) can share one implementation.
+export function expandWhitelist(whitelist: string[]): Set<string> {
+  const set = new Set<string>();
+  for (const entry of whitelist) {
+    // normalize the whole-phrase form too (e.g. a stray trailing "." from a copy-pasted whitelist
+    // entry), so it stays symmetric with the resume-side token normalization above
+    const lower = stripTokenBoundaryPunctuation(entry.toLowerCase().trim());
+    if (lower) set.add(lower);
+    for (const word of whitelistComponents(entry)) {
+      set.add(word);
+    }
+  }
+  return set;
 }
 
 /**
@@ -205,7 +257,7 @@ export function buildReport(
   const keywords = extractKeywords(jobDescription);
   const baseText = stripLatex(baseTex);
   const tailoredText = stripLatex(tailoredTex);
-  const whitelistLower = new Set(whitelist.map((w) => w.toLowerCase()));
+  const whitelistLower = expandWhitelist(whitelist);
 
   const matchedBefore = keywords.filter((k) => containsWord(baseText, k));
   const matchedAfter = keywords.filter((k) => containsWord(tailoredText, k));
@@ -221,6 +273,13 @@ export function buildReport(
   // keywords the résumé can't honestly back up: missing from the tailored text AND not on the
   // whitelist -- tailoring must never fabricate these in, so surfacing them is the whole point
   const missingNotClaimable = missing.filter((k) => !whitelistLower.has(k));
+  // a keyword newly matched in the tailored text (wasn't matched in the base) that isn't backed
+  // by the whitelist is a fabrication by definition -- this is a whole-text, macro-agnostic
+  // backstop on top of the validator's per-macro signals, which can miss e.g. a bare skill name
+  // sitting in an unbolded second brace group inside `\item` (Technical Skills), not `\resumeItem`
+  const fabricatedAdded = matchedAfter.filter(
+    (k) => !matchedBefore.includes(k) && !whitelistLower.has(k)
+  );
 
   return {
     keywords,
@@ -230,5 +289,6 @@ export function buildReport(
     scoreAfter,
     missing,
     missingNotClaimable,
+    fabricatedAdded,
   };
 }

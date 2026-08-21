@@ -14,7 +14,9 @@ const RULE_LABELS: Record<TailorViolation["rule"], string> = {
   "removed-line": "Content removed",
   "bullet-too-long": "Bullet too long",
   "unescaped-percent": "Unescaped %",
-  "non-whitelisted-keyword": "Unverified keyword",
+  // named to carry the actual stakes (an unverifiable claim on a real job application), not a
+  // generic-severity label that reads the same as a cosmetic issue like "Bullet too long"
+  "non-whitelisted-keyword": "Possible fabricated skill",
   "unparseable-response": "Response error",
 };
 
@@ -46,18 +48,56 @@ export default function ReportCard({ report, violations }: ReportCardProps) {
     scoreAfter,
     missing = [],
     missingNotClaimable = [],
+    fabricatedAdded = [],
   } = report ?? {};
   const scoresAvailable = typeof scoreBefore === "number" && typeof scoreAfter === "number";
   // "missing" already includes missingNotClaimable -- split out the subset Claude could still add
   // (on the whitelist) so the two lists never overlap and each reads as a distinct, honest signal
   const missingClaimable = missing.filter((k) => !missingNotClaimable.includes(k));
   const delta = scoresAvailable ? scoreAfter - scoreBefore : 0;
+  // a fabricated term must never render as a legitimate "Matched" chip -- it gets its own hard
+  // warning block instead (below), so it's excluded from the matched list entirely
+  const matchedAfterHonest = matchedAfter.filter((k) => !fabricatedAdded.includes(k));
 
   return (
     <section aria-labelledby="report-heading" className="rc-root">
       <h3 id="report-heading" className="rc-heading">
         ATS match report
       </h3>
+
+      {fabricatedAdded.length > 0 && (
+        // deliberately styled harder than `.rc-violations` (which reads as a routine, fixable
+        // validator warning) -- a fabricated skill is not a formatting nit, it's an unclaimable
+        // skill about to go on a real job application. Inline styling (not a new globals.css
+        // class) keeps this change scoped to this component.
+        <div
+          className="rc-fabrication-warning"
+          role="alert"
+          style={{
+            padding: "12px 14px",
+            borderRadius: 4,
+            background: "#fdecea",
+            border: "1px solid #b3261e",
+            color: "#611a15",
+          }}
+        >
+          <p style={{ fontWeight: 700, marginBottom: 6 }}>
+            {fabricatedAdded.length} possible fabricated skill{fabricatedAdded.length === 1 ? "" : "s"} detected
+          </p>
+          <p style={{ marginBottom: 8 }}>
+            These terms appear in the tailored resume but were not in your original resume and are
+            not on your skills whitelist -- they cannot be verified as skills you actually have.
+            Remove them or add them to your whitelist before approving.
+          </p>
+          <ul className="rc-chip-list">
+            {fabricatedAdded.map((kw) => (
+              <li key={kw} className="rc-chip" style={{ background: "#b3261e", color: "#fff" }}>
+                {kw}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {violations.length > 0 && (
         <div className="rc-violations" role="alert">
@@ -104,12 +144,12 @@ export default function ReportCard({ report, violations }: ReportCardProps) {
           </p>
 
           <h4 className="rc-subheading">
-            Matched ({matchedAfter.length} of {keywords.length})
+            Matched ({matchedAfterHonest.length} of {keywords.length})
           </h4>
-          {matchedAfter.length === 0 ? (
+          {matchedAfterHonest.length === 0 ? (
             <p className="rc-empty">No keywords matched yet.</p>
           ) : (
-            <KeywordChips keywords={matchedAfter} tone="matched" />
+            <KeywordChips keywords={matchedAfterHonest} tone="matched" />
           )}
 
           {missing.length === 0 ? (

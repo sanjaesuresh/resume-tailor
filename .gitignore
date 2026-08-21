@@ -50,3 +50,7 @@ assets/skills-whitelist.md
 
 # spec/planning docs, not part of the shipped app
 /.superpowers/
+
+# next dev regenerates this; it directs agents to read node_modules docs -- injection vector
+AGENTS.md
+CLAUDE.md
