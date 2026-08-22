@@ -1,8 +1,10 @@
 import fs from "fs";
 import { describe, expect, it } from "vitest";
-import { tailorResume, type TailoredResume } from "../tailor";
+import { tailorResume, type TailorInputs, type TailoredResume } from "../tailor";
 import type { ClaudeProvider, StructuredRequest } from "../provider";
 import { WHITELIST_PATH } from "../config";
+import { parseWhitelist } from "../settings";
+import { DEFAULT_TAILOR_PROMPT } from "../prompts/tailor";
 import { z } from "zod";
 
 // 2 experience blocks of 3 bullets each, real template macros (\resumeItem, \section) so the
@@ -35,6 +37,14 @@ Python, SQL, Git
 
 const whitelist = ["Python", "SQL", "Git", "Docker", "Kubernetes"];
 
+// the per-person inputs a run needs. A function rather than a constant so a test that mutates one
+// field cannot leak that into the next test.
+const inputs = (): TailorInputs => ({
+  baseTex,
+  whitelist,
+  systemPrompt: DEFAULT_TAILOR_PROMPT,
+});
+
 const jobDescription =
   "Looking for a backend engineer with strong Python skills, experience with Docker containers, and Kubernetes orchestration.";
 
@@ -66,7 +76,7 @@ describe("tailorResume", () => {
       { company: "Acme Corp", role: "Backend Engineer", tex: validTex },
     ]);
 
-    const result = await tailorResume(jobDescription, { provider, baseTex, whitelist });
+    const result = await tailorResume(jobDescription, inputs(), { provider });
 
     expect(calls).toHaveLength(1);
     expect(result.violations).toEqual([]);
@@ -102,7 +112,7 @@ describe("tailorResume", () => {
       { company: "Acme Corp", role: "Backend Engineer", tex: correctedTex },
     ]);
 
-    const result = await tailorResume(jobDescription, { provider, baseTex, whitelist });
+    const result = await tailorResume(jobDescription, inputs(), { provider });
 
     expect(calls).toHaveLength(2);
     expect(result.violations).toEqual([]);
@@ -121,7 +131,7 @@ describe("tailorResume", () => {
       { company: "Acme Corp", role: "Backend Engineer", tex: violatingTex },
     ]);
 
-    const result = await tailorResume(jobDescription, { provider, baseTex, whitelist });
+    const result = await tailorResume(jobDescription, inputs(), { provider });
 
     expect(calls).toHaveLength(3);
     expect(result.violations.length).toBeGreaterThan(0);
@@ -142,7 +152,7 @@ describe("tailorResume", () => {
       { company: "Acme Corp", role: "Backend Engineer", tex: correctedTex },
     ]);
 
-    await tailorResume(jobDescription, { provider, baseTex, whitelist });
+    await tailorResume(jobDescription, inputs(), { provider });
 
     const secondCallMessage = calls[1].user;
     expect(secondCallMessage).toContain("removed-line");
@@ -154,7 +164,7 @@ describe("tailorResume", () => {
     // schema" signal), never a tex at all
     const { provider, calls } = fakeProvider([null, null, null]);
 
-    await expect(tailorResume(jobDescription, { provider, baseTex, whitelist })).rejects.toThrow(
+    await expect(tailorResume(jobDescription, inputs(), { provider })).rejects.toThrow(
       "Claude did not return a parseable resume after all retries"
     );
 
@@ -184,19 +194,20 @@ describe("tailorResume", () => {
       { company: "Acme Corp", role: "Backend Engineer", tex: correctedTex },
     ]);
 
-    await tailorResume(jobDescription, { provider, baseTex, whitelist, feedback, previousTex });
+    await tailorResume(jobDescription, inputs(), { provider, feedback, previousTex });
 
     const secondCallMessage = calls[1].user;
     expect(secondCallMessage).toContain(feedback);
     expect(secondCallMessage).toContain("removed-line");
   });
 
-  it("reads the whitelist from disk (Step 3) when opts.whitelist is not overridden", async () => {
-    // exercises the real on-disk parsing path against the actual committed sample asset
-    // (WHITELIST_PATH falls back to base-resume.sample's whitelist sibling when no real,
-    // gitignored file is present) -- a format change in the sample file would be caught here
+  it("catches a keyword missing from the real parsed whitelist asset", async () => {
+    // tailorResume no longer reads any file -- the caller resolves whose whitelist this is. The
+    // value of this test is still the REAL committed sample asset and the real parser, so a format
+    // change in that file is caught here rather than at runtime.
     const markdown = fs.readFileSync(WHITELIST_PATH, "utf-8");
     expect(markdown).toContain("Python"); // sanity: fixture assumption below depends on this
+    const diskWhitelist = parseWhitelist(markdown);
 
     // "Python" is on the disk whitelist and already in baseTex, so bolding it again is not a
     // fabrication; "Terraform" is NOT on the sample whitelist, so introducing it here must be
@@ -211,7 +222,11 @@ describe("tailorResume", () => {
       { company: "Acme Corp", role: "Backend Engineer", tex },
     ]);
 
-    const result = await tailorResume(jobDescription, { provider, baseTex }); // no whitelist override
+    const result = await tailorResume(
+      jobDescription,
+      { baseTex, whitelist: diskWhitelist, systemPrompt: DEFAULT_TAILOR_PROMPT },
+      { provider }
+    );
 
     expect(result.violations.some((v) => v.rule === "non-whitelisted-keyword")).toBe(true);
   });

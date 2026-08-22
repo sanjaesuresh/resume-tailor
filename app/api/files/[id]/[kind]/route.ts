@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { getApplication } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { getUserSettings } from "@/lib/settings";
 import { DATA_DIR, RESUME_OWNER_NAME } from "@/lib/config";
 
 type FileKind = "pdf" | "tex";
@@ -23,9 +24,14 @@ function isFileKind(value: string): value is FileKind {
  * Exported and pure so the format is pinned by a test -- the route itself needs a real database
  * row and DATA_DIR to exercise.
  */
-export function downloadFilename(id: number, kind: FileKind): string {
-  // quotes and control characters would break out of the quoted Content-Disposition value
-  const owner = RESUME_OWNER_NAME.replace(/["\\\r\n]/g, "").trim();
+export function downloadFilename(id: number, kind: FileKind, ownerName?: string | null): string {
+  // quotes and control characters would break out of the quoted Content-Disposition value.
+  // Re-sanitised here even though settings validation already does it, because this is the last
+  // point before the value reaches a header and the env fallback never passed through settings.
+  const raw = ownerName?.trim() || RESUME_OWNER_NAME;
+  const owner = raw.replace(/["\\\r\n]/g, "").trim();
+  // "Resume - " and the id are supplied here, so a display name of "Sanjae Suresh" is what
+  // produces "Resume - Sanjae Suresh 12.pdf" -- the name alone, not the whole filename
   return `Resume - ${owner} ${id}.${kind}`;
 }
 
@@ -82,7 +88,9 @@ export async function GET(
   }
 
   const body = fs.readFileSync(resolvedPath);
-  const filename = downloadFilename(id, kind);
+  // the name a recruiter sees on disk comes from the owner's own settings; RESUME_OWNER_NAME
+  // stays as the fallback for an account that has not set one
+  const filename = downloadFilename(id, kind, getUserSettings(auth.user.id).displayName);
 
   return new Response(body, {
     headers: {

@@ -1,11 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { authClient } from "@/app/components/authClient";
 
 const LINKS = [
   { href: "/new", label: "New Application" },
   { href: "/", label: "Tracker" },
+  { href: "/settings", label: "Settings" },
 ];
 
 /**
@@ -15,6 +18,20 @@ const LINKS = [
  */
 export default function SiteNav() {
   const pathname = usePathname();
+  const router = useRouter();
+  // shared nanostore, not a fetch this component owns -- signing out elsewhere (or a session
+  // expiring) updates this without SiteNav doing any polling of its own
+  const { data: session, isPending } = authClient.useSession();
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    await authClient.signOut();
+    setSigningOut(false);
+    // every route ends up requiring a session once phase 1 lands ownership checks, so sending the
+    // user straight to sign-in avoids a render of a now-unauthorized page before the redirect
+    router.push("/signin");
+  }
 
   return (
     <header className="site-nav">
@@ -32,6 +49,36 @@ export default function SiteNav() {
             </Link>
           );
         })}
+
+        {/* isPending covers the instant on first paint before the session store resolves --
+            rendering nothing then (rather than a placeholder) avoids a flash of the wrong state */}
+        {!isPending && (
+          <div className="site-nav-account">
+            {session?.user ? (
+              <>
+                <span className="site-nav-user">{session.user.email}</span>
+                <button
+                  type="button"
+                  className="na-link-btn"
+                  onClick={handleSignOut}
+                  disabled={signingOut}
+                >
+                  {signingOut ? "Signing out…" : "Sign out"}
+                </button>
+              </>
+            ) : (
+              <Link
+                href="/signin"
+                aria-current={pathname === "/signin" ? "page" : undefined}
+                className={
+                  pathname === "/signin" ? "site-nav-link site-nav-link--current" : "site-nav-link"
+                }
+              >
+                Sign in
+              </Link>
+            )}
+          </div>
+        )}
       </nav>
     </header>
   );

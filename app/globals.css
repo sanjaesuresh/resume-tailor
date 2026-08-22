@@ -1306,6 +1306,51 @@ a {
   background: var(--na-paper-raised, #f8fafc);
 }
 
+/* ---- Auth (app/signin, app/signup) ---------------------------------------------------------- */
+
+/* the original .na-field input rule (above) only lists type="text"/"url" -- signin/signup are the
+   first forms in the app to need type="email"/"password", so they're added here rather than
+   editing that rule, reusing its exact declarations */
+.na-field input[type="email"],
+.na-field input[type="password"] {
+  padding: 10px 12px;
+  border: 1px solid var(--na-rule, #c7ced8);
+  border-radius: var(--na-radius);
+  background: var(--na-paper-raised, #f8fafc);
+  color: var(--na-ink, #0f1826);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.na-field input[type="email"][aria-invalid="true"],
+.na-field input[type="password"][aria-invalid="true"] {
+  border-color: var(--na-danger, #d92b2b);
+}
+
+/* plain-copy notice ("this is invite-only") -- deliberately not styled as a callout box, since
+   it's a statement of fact about the product, not a warning */
+.na-notice {
+  font-size: var(--na-fs-md);
+  color: var(--na-ink-muted, #5b6472);
+}
+
+/* ---- SiteNav account section (app/components/SiteNav.tsx) ----------------------------------- */
+
+/* pushed to the far end of the existing flex row via margin-left: auto, so the primary links'
+   layout is untouched -- an addition to the row, not a rework of it */
+.site-nav-account {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.site-nav-user {
+  color: var(--na-ink-muted, #5b6472);
+  font-weight: 500;
+}
+
 /* the role doubles as the link to the posting it came from */
 .tr-role-link {
   color: var(--na-ink, #0f1826);
@@ -1325,4 +1370,75 @@ a {
   margin-left: 4px;
   font-size: 0.85em;
   color: var(--na-rule-strong, #99a4b3);
+}
+
+/* ---- Settings (app/settings/page.tsx) ------------------------------------------------------- */
+
+/* stacks the page's four independently-saving sections with a hairline rule between them --
+   distinct from .na-decision (named for the approve/decline moment in the tailoring flow) since
+   repurposing that class here for an unrelated layout need would make its name misleading */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-top: 28px;
+  border-top: 1px solid var(--na-rule, #c7ced8);
+}
+
+.settings-section:first-of-type {
+  padding-top: 0;
+  border-top: none;
+}
+
+/* small muted helper/status text under a field -- e.g. "Ready to save: resume.tex", the
+   empty-whitelist notice tied to its textarea via aria-describedby, the filename hint under
+   Display name. Distinct from na-field-error, which is reserved for actual validation errors and
+   styled in correction red -- this is guidance, not a fault. */
+.na-field-hint {
+  font-size: var(--na-fs-sm);
+  color: var(--na-ink-muted, #5b6472);
+}
+
+/* resume paste, tailoring prompt, and skills whitelist are code/data, not manuscript prose --
+   overrides the serif "document face" the shared .na-field textarea rule applies everywhere else
+   (job description, feedback), which stays unslop-ignore'd for actual prose */
+.na-field textarea.na-mono {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--na-fs-sm);
+}
+
+.na-field input[type="file"] {
+  font-family: inherit;
+  font-size: var(--na-fs-sm);
+  color: var(--na-ink, #0f1826);
+}
+
+/* native <dialog> confirm used for this page's two discard-ish confirmations (replacing a saved
+   resume, resetting the prompt over an unsaved edit) -- showModal()/close() gives focus-trapping,
+   Escape-to-close, and focus-return to the trigger for free, so no custom JS handles any of that */
+.settings-dialog {
+  padding: 24px;
+  border: 1px solid var(--na-rule-strong, #99a4b3);
+  border-radius: var(--na-radius);
+  background: var(--na-paper-raised, #f8fafc);
+  color: var(--na-ink, #0f1826);
+  max-width: 420px;
+  width: calc(100vw - 48px);
+}
+
+.settings-dialog::backdrop {
+  background: color-mix(in srgb, var(--na-ink, #0f1826) 45%, transparent);
+}
+
+.settings-dialog-title {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--na-fs-lg);
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.settings-dialog-body {
+  font-size: var(--na-fs-md);
+  color: var(--na-ink-muted, #5b6472);
+  margin-bottom: 20px;
 }
