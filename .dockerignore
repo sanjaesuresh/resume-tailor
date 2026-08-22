@@ -1,0 +1,31 @@
+# This repo is PUBLIC. Anything listed here that reached the build context would be baked
+# into a distributable image layer -- getting this wrong ships someone's real resume or
+# secrets to anyone who can pull the image, even after later fixing it (layers are cached).
+
+# real personal files -- never committed (see .gitignore), never sent to the build context
+.env.local
+.env
+data/
+assets/base-resume.tex
+assets/skills-whitelist.md
+
+# rebuilt inside the image; copying the host's copy risks a host-architecture binary
+# (e.g. better-sqlite3 compiled/cached for arm64 on an Apple Silicon dev machine) leaking
+# into an x86 build, and it's a large, slow copy for no benefit
+node_modules
+.next
+
+# not needed at build time, and .git in particular can be large and has no place in an image
+.git
+.gitignore
+.history
+
+# editor/agent scratch, docs, and CI-irrelevant local state
+.claude
+.superpowers
+docs
+*.md
+tsconfig.tsbuildinfo
+
+npm-debug.log*
+.DS_Store
