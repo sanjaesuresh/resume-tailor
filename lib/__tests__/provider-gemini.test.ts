@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createGeminiProvider,
   describeCallFailure,
+  describeError,
   extractText,
   isTransientFailure,
   toGeminiJsonSchema,
@@ -85,9 +86,12 @@ describe("createGeminiProvider", () => {
     const generateContent = vi.fn().mockRejectedValue(new Error("socket hang up"));
     const client: GeminiClient = { models: { generateContent } };
 
+    // noSleep matters: a dropped socket is now retryable, so without it this waits out the real
+    // 1s/2s/4s backoff before failing
     await expect(
-      createGeminiProvider({ client })({ system: "s", user: "u", schema })
+      createGeminiProvider({ client, sleepFn: noSleep })({ system: "s", user: "u", schema })
     ).rejects.toThrow(GeminiError);
+    expect(generateContent).toHaveBeenCalledTimes(4);
   });
 
   it("times out instead of hanging a route forever", async () => {
@@ -141,14 +145,16 @@ describe("transient overload handling", () => {
     await expect(
       createGeminiProvider({ client, sleepFn: noSleep })({ system: "s", user: "u", schema })
     ).rejects.toThrow(/503/);
-    expect(generateContent).toHaveBeenCalledTimes(3); // initial attempt + 2 retries
+    expect(generateContent).toHaveBeenCalledTimes(4); // initial attempt + 3 retries
   });
 
-  it("backs off exponentially between attempts", async () => {
+  it("rides out a burst several seconds long", async () => {
+    // the budget was raised from 1s/2s after Google's 503s on the flash models turned out to
+    // arrive in bursts that outlasted it -- a run died inside a single burst
     const delays: number[] = [];
-    const { client } = flakyClient(2);
+    const { client, generateContent } = flakyClient(3);
 
-    await createGeminiProvider({
+    const result = await createGeminiProvider({
       client,
       sleepFn: (ms) => {
         delays.push(ms);
@@ -156,7 +162,9 @@ describe("transient overload handling", () => {
       },
     })({ system: "s", user: "u", schema });
 
-    expect(delays).toEqual([1000, 2000]);
+    expect(result).toEqual({ tex: "recovered" });
+    expect(generateContent).toHaveBeenCalledTimes(4);
+    expect(delays).toEqual([1000, 2000, 4000]);
   });
 
   it("does not retry a failure that will never succeed", async () => {
@@ -170,12 +178,50 @@ describe("transient overload handling", () => {
   });
 });
 
+describe("describeError", () => {
+  it("follows cause, so a bare 'fetch failed' says why it failed", () => {
+    // undici throws "fetch failed" and hides the real reason on cause; reporting only the top
+    // level told the user their request failed with no clue at all
+    const err = new Error("fetch failed", { cause: new Error("ECONNRESET") });
+    expect(describeError(err)).toBe("fetch failed: ECONNRESET");
+  });
+
+  it("reads a bare code off cause when it is not an Error", () => {
+    const err = Object.assign(new Error("fetch failed"), { cause: { code: "ENOTFOUND" } });
+    expect(describeError(err)).toBe("fetch failed: ENOTFOUND");
+  });
+
+  it("does not repeat itself when cause carries the same message", () => {
+    const err = new Error("boom", { cause: new Error("boom") });
+    expect(describeError(err)).toBe("boom");
+  });
+
+  it("handles an error with no cause, and a non-Error throw", () => {
+    expect(describeError(new Error("plain"))).toBe("plain");
+    expect(describeError("just a string")).toBe("just a string");
+  });
+});
+
 describe("isTransientFailure", () => {
   it("retries the statuses Google uses for overload and rate limiting", () => {
     for (const status of [429, 500, 502, 503, 504]) {
       expect(isTransientFailure(new GeminiError(`Gemini request failed: {"code":${status}}`))).toBe(
         true
       );
+    }
+  });
+
+  it("retries a transport failure that never reached an HTTP status", () => {
+    // this is the gap that failed a real run: undici's "fetch failed" carries no status code, so
+    // a dropped socket gave up on the first attempt while an identical outage that got as far as
+    // a 503 was retried three times
+    for (const message of [
+      "Gemini request failed: fetch failed",
+      "Gemini request failed: fetch failed: ECONNRESET",
+      "Gemini request failed: socket hang up",
+      "Gemini request failed: getaddrinfo EAI_AGAIN generativelanguage.googleapis.com",
+    ]) {
+      expect(isTransientFailure(new GeminiError(message))).toBe(true);
     }
   });
 

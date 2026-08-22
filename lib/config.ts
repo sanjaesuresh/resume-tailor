@@ -6,11 +6,18 @@ export const MODEL = "claude-sonnet-5";
 export const MAX_TOKENS = 16000;
 
 // Gemini's ids move faster than Anthropic's, so this is env-overridable without a code change.
+//
 // Deliberately a *flash* model: on a free-tier key every pro model (gemini-pro-latest,
-// gemini-3.1-pro-preview) answers 429 quota-exceeded, and gemini-2.5-pro is 404 "no longer
-// available to new users" despite still being listed by models.list. Do not "upgrade" this to a
-// pro id without checking the key's quota first -- it will fail on every call, not degrade.
-export const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.7-flash";
+// gemini-3.1-pro-preview) answers 429 quota-exceeded, and gemini-2.5-pro/2.5-flash answer 404
+// "no longer available to new users" despite still being listed by models.list. Do not "upgrade"
+// this to a pro id without checking the key's quota -- it fails on every call, it does not degrade.
+//
+// 3.5 rather than the newer 3.7 on measured availability, not preference: sampled four real
+// requests each against this key, 3.7-flash returned 503 "high demand" 4/4 while 3.5-flash
+// answered 4/4 at ~4.9s. 3.7 had already blocked two real runs. If it frees up later, this is one
+// env var away -- but check with real traffic rather than a single ping, since the failures come
+// in bursts.
+export const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
 
 // deliberately well above MAX_TOKENS: on the 2.5+ models an internal thinking budget is drawn from
 // the same output allowance, and a resume that stops mid-document comes back as a schema mismatch

@@ -48,7 +48,15 @@ export interface GeminiClient {
 // so a transport throw escapes it entirely and surfaces as a 502. Retried here instead, which is
 // where transport concerns belong and leaves that loop's semantics untouched.
 const TRANSIENT_STATUS = [429, 500, 502, 503, 504];
-const MAX_TRANSIENT_RETRIES = 2;
+
+// transport failures that never reached an HTTP status. "fetch failed" is undici's generic
+// wrapper and is what a dropped connection actually surfaces as here.
+const NETWORK_FAILURE =
+  /fetch failed|socket hang up|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|UND_ERR/i;
+
+// three retries rather than two, at 1s/2s/4s: Google's 503s on the flash models arrive in bursts
+// several seconds long, and the old 1s/2s budget gave up inside a single burst
+const MAX_TRANSIENT_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 1000;
 
 export interface GeminiProviderOptions {
@@ -185,7 +193,33 @@ export function extractText(response: GeminiResponse): string {
 export function isTransientFailure(err: unknown): boolean {
   if (!(err instanceof GeminiError)) return false;
   if (/timed out after/.test(err.message)) return false;
-  return TRANSIENT_STATUS.some((status) => new RegExp(`\\b${status}\\b`).test(err.message));
+  if (TRANSIENT_STATUS.some((status) => new RegExp(`\\b${status}\\b`).test(err.message))) {
+    return true;
+  }
+  // a connection that never produced an HTTP status at all. undici reports these as a bare
+  // "fetch failed", which carries no code to match on above -- and it is every bit as transient
+  // as a 503, so leaving it out meant a dropped socket failed a whole tailoring run on the first
+  // try while an identical outage that got as far as a status code was retried three times.
+  return NETWORK_FAILURE.test(err.message);
+}
+
+/**
+ * Flattens an error to a message, following `cause` one level.
+ *
+ * undici throws a bare "fetch failed" and puts the real reason (ECONNRESET, ENOTFOUND, a TLS
+ * failure) on `cause`. Reporting only the top-level message told the user their request failed
+ * without a single clue why, which is the least useful thing an error can do. Exported so the
+ * unwrapping is pinned by a test.
+ */
+export function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause instanceof Error && cause.message && cause.message !== err.message) {
+    return `${err.message}: ${cause.message}`;
+  }
+  // some runtimes attach a bare code rather than an Error
+  const code = (cause as { code?: string } | undefined)?.code;
+  return code ? `${err.message}: ${code}` : err.message;
 }
 
 // pure so every branch is unit-testable without a network call. A bad key and an unknown model id
@@ -200,7 +234,7 @@ export function describeCallFailure(
     return new GeminiError(`Gemini request timed out after ${Math.round(timeoutMs / 1000)}s`);
   }
 
-  const message = err instanceof Error ? err.message : String(err);
+  const message = describeError(err);
   const detail = message.slice(0, ERROR_DETAIL_MAX_CHARS);
 
   if (/api[ _-]?key|unauthenticated|permission denied|401|403/i.test(detail)) {
