@@ -73,7 +73,7 @@ function AtsScoreCell({ atsReport }: { atsReport: AtsReport | null }) {
     : `${atsReport.scoreAfter}`;
 
   return (
-    <span title={title}>
+    <span title={title} className="na-num">
       {atsReport.scoreAfter}
       <span style={visuallyHiddenStyle}>
         {hasBefore
@@ -261,8 +261,27 @@ export default function Home() {
               {sorted.map((app) => (
                 <tr key={app.id}>
                   <td>{app.company}</td>
-                  <td>{app.role}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>{formatDate(app.appliedAt)}</td>
+                  <td>
+                    {/* the role IS the posting -- linking it here retires the separate "Posting"
+                        link, leaving the Links column to the two files this app produced */}
+                    {app.url ? (
+                      <a
+                        className="tr-role-link"
+                        href={app.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {app.role}
+                        <span className="tr-ext" aria-hidden="true">
+                          ↗
+                        </span>
+                        <span className="visually-hidden"> (opens the job posting in a new tab)</span>
+                      </a>
+                    ) : (
+                      app.role
+                    )}
+                  </td>
+                  <td className="tr-num" style={{ whiteSpace: "nowrap" }}>{formatDate(app.appliedAt)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <AtsScoreCell atsReport={app.atsReport} />
                   </td>
@@ -279,15 +298,9 @@ export default function Home() {
                   </td>
                   <td>
                     <div className="tr-links">
-                      {app.url ? (
-                        <a href={app.url} target="_blank" rel="noopener noreferrer">
-                          Posting ↗
-                        </a>
-                      ) : (
-                        <span>—</span>
-                      )}
                       {app.pdfPath && <a href={`/api/files/${app.id}/pdf`}>PDF</a>}
                       {app.texPath && <a href={`/api/files/${app.id}/tex`}>TeX</a>}
+                      {!app.pdfPath && !app.texPath && <span>—</span>}
                     </div>
                   </td>
                 </tr>

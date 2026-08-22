@@ -1,63 +1,86 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #eef1f4;
+  --foreground: #0f1826;
 
-  /* "ink & paper": a warm off-white surface with near-black ink text and a deep rust accent,
-     chosen deliberately over the default blue/indigo-on-white SaaS look -- this is a résumé
-     tool, so the palette reads as a typeset document rather than a dashboard. Diff add/remove
-     and warning colors are the one place a conventional data-viz meaning (green=added,
-     red=removed, amber=warning) is kept on purpose -- an expected, functional convention here,
-     not a decorative default.
+  /* "typesetting proof": the app is a typesetter's proofing tool, so the palette reads as press
+     apparatus (proof stock, ink, non-photo blue pencil, correction red) rather than a SaaS
+     dashboard -- and deliberately not the warm-cream + rust + serif "ink & paper" look this
+     replaces, which read as generic AI-document styling rather than a chosen identity.
 
-     Elevation ladder (both themes): --na-paper (page background) < --na-neutral-bg (recessed /
-     grouped panels, e.g. the step index, quiet boxes) < --na-paper-raised (cards, inputs,
-     anything meant to read as "on top"). Applied site-wide, including the tracker, so both
-     pages of the app share one visual language instead of two. */
-  --na-paper: #faf7f2;
-  --na-paper-raised: #ffffff;
-  --na-ink: #1c1b1a;
-  --na-ink-muted: #6b6660;
-  --na-rule: #ddd6cb;
-  --na-accent: #7c2d12;
-  --na-accent-hover: #601f0a;
-  --na-focus: #1857b3;
-  --na-success: #1a7f37;
-  --na-success-bg: #e7f3ea;
-  --na-danger: #a3241a;
-  --na-danger-bg: #fbe2df;
-  --na-warn: #6b3d05;
-  --na-warn-bg: #fbe9c8;
-  --na-neutral-bg: #efeae1;
+     Five named colors, no drift in hue -- every other value below is a tint or a text-safe
+     derivative of one of these five:
+       #eef1f4  cool proof stock (the light ground -- NOT cream, NOT warm)
+       #0f1826  press black (ink)
+       #2b6cb0  non-photo blue (structure, marks, rules, active states)
+       #d92b2b  correction red (violations and destructive states ONLY)
+       #8b96a5  pencil grey (secondary text / decorative marks)
 
-  /* type scale: headings use --font-serif (Source Serif 4, an editorial document face) at three
-     sizes; everything else stays on the sans/mono faces already in use. A named scale (rather
-     than ad hoc px per element) is what keeps the heading/body contrast consistent as it's
-     reused across the tracker, the wizard, and every card component. */
-  --na-fs-heading-lg: 32px;
-  --na-fs-heading-md: 20px;
-  --na-fs-heading-sm: 17px;
+     --na-ink-muted and --na-danger-text are darkened derivatives of pencil grey and correction
+     red respectively: the literal spec values fall short of 4.5:1 body-text contrast on the
+     light proof-stock ground (pencil grey measures ~2.6:1, correction red ~4.3:1) -- so the
+     literal hex is kept as --na-pencil/--na-danger for decorative and non-text use (rule ticks,
+     chip backgrounds, borders), where 3:1 or no minimum applies, and a same-hue darker tint
+     carries anything that's actually read as text. On the dark ground both literal values
+     already clear 4.5:1 directly (checked against #0f1826), so no split is needed there.
+
+     Elevation ladder (both themes): --na-paper (page ground) is the baseline; --na-neutral-bg
+     (recessed/grouped panels -- the step index, skeleton rows, table header row) sits one step
+     dimmer than the baseline; --na-paper-raised (cards, inputs, anything meant to read as
+     "on top") sits one step brighter. Same ladder shape in both themes even though "brighter"
+     flips direction relative to the ground. */
+  --na-paper: #eef1f4;
+  --na-paper-raised: #f8fafc;
+  --na-neutral-bg: #e2e7ec;
+  --na-ink: #0f1826;
+  --na-ink-muted: #5b6472;
+  --na-pencil: #8b96a5;
+  --na-rule: #c7ced8;
+  --na-rule-strong: #99a4b3;
+  --na-accent: #2b6cb0;
+  --na-accent-hover: #1f5490;
+  --na-accent-bg: #dde8f3;
+  --na-focus: #2b6cb0;
+  --na-danger: #d92b2b;
+  --na-danger-text: #b91c1c;
+  --na-danger-bg: #fbe2e2;
+
+  /* near-zero radius: printed matter has square corners. A deliberate move away from the
+     rounded-everything default, not an oversight -- buttons/inputs/panels get a hair of radius
+     just to keep edges from looking knife-cut; grid cells and hairline-bordered panels omit it. */
+  --na-radius: 2px;
+
+  /* type scale: a real ladder (not ad hoc px per element), reused across the tracker, the
+     wizard, and every card component so heading/body contrast stays consistent site-wide. */
+  --na-fs-2xl: 34px; /* stage / page heading */
+  --na-fs-xl: 21px; /* component heading (ReportCard, DiffView, tracker title) */
+  --na-fs-lg: 16px; /* emphasis / subheading */
+  --na-fs-md: 14px; /* body */
+  --na-fs-sm: 13px; /* secondary text, controls */
+  --na-fs-xs: 11.5px; /* eyebrows, legends, mono readouts */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* dark ground = "press room": deep press-black surface, blue and red re-tuned for contrast
+       against it rather than the light-ground tints reused verbatim. */
+    --background: #0f1826;
+    --foreground: #e7ecf1;
 
-    --na-paper: #17140f;
-    --na-paper-raised: #221e17;
-    --na-ink: #f2ede4;
-    --na-ink-muted: #b3aa9c;
-    --na-rule: #3a352c;
-    --na-accent: #e08a5b;
-    --na-accent-hover: #f3a878;
-    --na-focus: #6fa8ff;
-    --na-success: #4ade80;
-    --na-success-bg: #16301f;
-    --na-danger: #f28b7f;
-    --na-danger-bg: #3a1712;
-    --na-warn: #f0c674;
-    --na-warn-bg: #3a2c0d;
-    --na-neutral-bg: #2a251d;
+    --na-paper: #0f1826;
+    --na-paper-raised: #17212f;
+    --na-neutral-bg: #0a1119;
+    --na-ink: #e7ecf1;
+    --na-ink-muted: #8b96a5; /* the literal pencil grey clears 4.5:1 directly on this ground */
+    --na-pencil: #8b96a5;
+    --na-rule: #2a3543;
+    --na-rule-strong: #445266;
+    --na-accent: #5b9bd9;
+    --na-accent-hover: #7fb2e6;
+    --na-accent-bg: #1c3350;
+    --na-focus: #5b9bd9;
+    --na-danger: #ff6b6b;
+    --na-danger-text: #ff8080;
+    --na-danger-bg: #3a1414;
   }
 }
 
@@ -77,10 +100,9 @@ body {
   flex-direction: column;
   color: var(--na-ink, var(--foreground));
   background: var(--na-paper, var(--background));
-  /* every page in the app now shares one font decision -- previously only .na-root and the nav
-     opted into Geist and everything else (the whole tracker page) silently fell back to plain
-     Arial, an undecided default rather than a chosen one */
-  font-family: var(--font-geist-sans, Arial, Helvetica, sans-serif);
+  font-family: var(--font-sans, Arial, Helvetica, sans-serif);
+  font-size: var(--na-fs-md);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -104,9 +126,11 @@ a {
 
 /* a visible focus ring is a site-wide baseline, not just the new-application flow's concern --
    the default browser ring is easy to lose against colored buttons, so make it explicit and
-   consistent (only for keyboard focus, via :focus-visible, so mouse clicks stay ring-free) */
+   consistent (only for keyboard focus, via :focus-visible, so mouse clicks stay ring-free).
+   Non-photo blue reads as "active state" per the palette's own definition, so the focus ring
+   uses the same token as pressed/current UI states rather than a separate color. */
 :focus-visible {
-  outline: 2px solid var(--na-focus, #1857b3);
+  outline: 2px solid var(--na-focus, #2b6cb0);
   outline-offset: 2px;
 }
 
@@ -121,11 +145,34 @@ a {
   }
 }
 
+/* visually hides content from sighted users while keeping it in the accessibility tree -- a
+   shared CSS utility (app/page.tsx and StatusSelect.tsx use an equivalent inline style object
+   instead, predating this file's component-class conventions; new code uses this class) */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* mono/tabular utility for numeric readouts -- applied wherever digits need to align: ATS
+   scores, deltas, coverage counts, table cells that are pure numbers. Not applied to mixed
+   text like dates, which stay on the UI face with tabular-nums only (see .tr-num below). */
+.na-num {
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- shared nav (app/components/SiteNav.tsx) --------------------------------------------- */
 
 .site-nav {
-  border-bottom: 1px solid var(--na-rule, #ddd6cb);
-  background: var(--na-paper-raised, #fff);
+  border-bottom: 1px solid var(--na-rule, #c7ced8);
+  background: var(--na-paper-raised, #f8fafc);
 }
 
 .site-nav nav {
@@ -134,29 +181,29 @@ a {
   max-width: 1100px;
   margin: 0 auto;
   padding: 16px 24px;
-  font-family: var(--font-geist-sans, Arial, Helvetica, sans-serif);
-  font-size: 14px;
+  font-family: var(--font-sans, Arial, Helvetica, sans-serif);
+  font-size: var(--na-fs-sm);
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .site-nav-link {
-  color: var(--na-ink-muted, #6b6660);
+  color: var(--na-ink-muted, #5b6472);
   padding: 4px 2px;
   border-bottom: 2px solid transparent;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .site-nav-link:hover {
-    color: var(--na-ink, #1c1b1a);
-    border-bottom-color: var(--na-rule, #ddd6cb);
+    color: var(--na-ink, #0f1826);
+    border-bottom-color: var(--na-rule, #c7ced8);
   }
 }
 
-/* current-page indicator: previously no link ever showed which page you were on beyond the URL
-   bar (only :hover had any state at all) */
+/* current-page indicator, non-photo blue -- the palette's own "active state" color */
 .site-nav-link--current {
-  color: var(--na-ink, #1c1b1a);
-  border-bottom-color: var(--na-accent, #7c2d12);
+  color: var(--na-ink, #0f1826);
+  border-bottom-color: var(--na-accent, #2b6cb0);
 }
 
 /* ---- New Application flow (app/new/page.tsx) --------------------------------------------- */
@@ -167,57 +214,91 @@ a {
   max-width: 780px;
   margin: 0 auto;
   padding: 40px 24px 80px;
-  font-family: var(--font-geist-sans, Arial, Helvetica, sans-serif);
-  color: var(--na-ink, #1c1b1a);
-  background: var(--na-paper, #faf7f2);
+  font-family: var(--font-sans, Arial, Helvetica, sans-serif);
+  color: var(--na-ink, #0f1826);
+  background: var(--na-paper, #eef1f4);
 }
 
-/* Step index: numbered, editorial "table of contents" treatment rather than a bare underline
-   row -- the previous version only distinguished "current" from "done" by text color, with both
-   sharing the exact same border color, so at a glance the two states read as one. Current now
-   gets a filled background tint plus a heavier rule; done keeps the quieter underline-only
+/* Step index: a proof sheet's running head, not a progress bar -- numbered in mono (every
+   readout is mono), hairline rules rather than the previous 3-4px chunky underline. Current
+   gets a filled background tint plus the accent rule; done keeps the quieter ink-only
    treatment (it's behind you); upcoming stays fully muted. */
+/* The stepper IS the progress bar: zero gap between items, so the four 2px rules meet as one
+   continuous bar whose segments change colour as you advance. Every state uses that same 2px
+   weight -- the previous version mixed a 2px rule with a -1px margin on the current step, which
+   left it sitting a pixel below its neighbours. */
 .na-steps {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 0;
   list-style: none;
-  margin-bottom: 36px;
+  margin-bottom: 32px;
 }
 
+/* sized to its own label, never a forced quarter of the width -- equal columns left "Done" (4
+   characters) holding the same space as "Confirm description" (19), which is what made the row
+   read as badly spaced */
 .na-step {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  flex: 1;
-  padding: 10px 10px 9px 2px;
-  border-bottom: 3px solid var(--na-rule, #ddd6cb);
-  color: var(--na-ink-muted, #6b6660);
+  gap: 7px;
+  padding: 4px 26px 8px 0;
+  border-bottom: 2px solid var(--na-rule, #c7ced8);
+  color: var(--na-ink-muted, #5b6472);
+  white-space: nowrap;
 }
 
+.na-step:last-child {
+  padding-right: 0;
+}
+
+/* a superior figure, the way a typesetter marks a footnote -- small, raised, never a badge */
 .na-step-index {
-  font-family: var(--font-geist-mono, monospace);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  opacity: 0.7;
+  position: relative;
+  top: -0.45em;
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  color: var(--na-rule-strong, #99a4b3);
 }
 
 .na-step-label {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--na-fs-sm);
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 .na-step--done {
-  color: var(--na-ink, #1c1b1a);
-  border-bottom-color: var(--na-accent, #7c2d12);
+  color: var(--na-ink-muted, #5b6472);
+  border-bottom-color: var(--na-accent, #2b6cb0);
 }
 
+.na-step--done .na-step-index {
+  color: var(--na-accent, #2b6cb0);
+}
+
+/* one signal, not two: the filled block behind the current step has gone, leaving the ink weight
+   and the blue rule to carry it */
 .na-step--current {
-  color: var(--na-accent, #7c2d12);
-  background: var(--na-neutral-bg, #efeae1);
-  border-bottom: 4px solid var(--na-accent, #7c2d12);
-  border-radius: 4px 4px 0 0;
-  margin-bottom: -1px;
+  color: var(--na-ink, #0f1826);
+  border-bottom-color: var(--na-accent, #2b6cb0);
+}
+
+.na-step--current .na-step-label {
+  font-weight: 600;
+}
+
+.na-step--current .na-step-index {
+  color: var(--na-accent, #2b6cb0);
+}
+
+@media (max-width: 620px) {
+  /* labels stay on one line each; the row wraps instead of squashing them under their numbers */
+  .na-step {
+    padding-right: 18px;
+  }
 }
 
 .na-section {
@@ -228,7 +309,7 @@ a {
 
 .na-heading {
   font-family: var(--font-serif, Georgia, serif);
-  font-size: var(--na-fs-heading-lg);
+  font-size: var(--na-fs-2xl);
   font-weight: 600;
   letter-spacing: -0.3px;
   line-height: 1.2;
@@ -242,11 +323,11 @@ a {
 /* small uppercase section label used to chunk the review step into scannable groups (details /
    decision) without adding another card -- purely a typographic grouping device */
 .na-eyebrow {
-  font-size: 12px;
+  font-size: var(--na-fs-xs);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--na-ink-muted, #6b6660);
+  color: var(--na-ink-muted, #5b6472);
 }
 
 .na-field {
@@ -257,17 +338,17 @@ a {
 
 .na-field label,
 .na-readonly-label {
-  font-size: 13px;
+  font-size: var(--na-fs-sm);
   font-weight: 600;
-  color: var(--na-ink-muted, #6b6660);
+  color: var(--na-ink-muted, #5b6472);
 }
 
 .na-readonly-value {
   padding: 10px 12px;
-  border: 1px solid var(--na-rule, #ddd6cb);
-  border-radius: 4px;
-  background: var(--na-neutral-bg, #efeae1);
-  font-size: 14px;
+  border: 1px solid var(--na-rule, #c7ced8);
+  border-radius: var(--na-radius);
+  background: var(--na-neutral-bg, #e2e7ec);
+  font-size: var(--na-fs-md);
   word-break: break-all;
 }
 
@@ -275,18 +356,23 @@ a {
 .na-field input[type="url"],
 .na-field textarea {
   padding: 10px 12px;
-  border: 1px solid var(--na-rule, #ddd6cb);
-  border-radius: 4px;
-  background: var(--na-paper-raised, #fff);
-  color: var(--na-ink, #1c1b1a);
+  border: 1px solid var(--na-rule, #c7ced8);
+  border-radius: var(--na-radius);
+  background: var(--na-paper-raised, #f8fafc);
+  color: var(--na-ink, #0f1826);
   font-family: inherit;
   font-size: 15px;
   line-height: 1.5;
 }
 
+/* unslop-ignore: see app/layout.tsx's note on the document display face -- the job description
+   is manuscript copy being proofed, not a UI control, so it reads on the document face at a
+   comfortable line length, same as the diff/heading text, on the cool #eef1f4 proof-stock
+   ground rather than a cream one */
 .na-field textarea {
-  font-family: var(--font-geist-mono, monospace);
-  font-size: 13px;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--na-fs-lg);
+  line-height: 1.5;
   resize: vertical;
 }
 
@@ -296,12 +382,12 @@ a {
 }
 
 .na-field input[aria-invalid="true"] {
-  border-color: var(--na-danger, #a3241a);
+  border-color: var(--na-danger, #d92b2b);
 }
 
 .na-field-error {
-  font-size: 13px;
-  color: var(--na-danger, #a3241a);
+  font-size: var(--na-fs-sm);
+  color: var(--na-danger-text, #b91c1c);
 }
 
 .na-review-fields {
@@ -328,33 +414,36 @@ a {
   justify-content: center;
   height: 40px;
   padding: 0 18px;
-  border-radius: 4px;
+  border-radius: var(--na-radius);
   border: 1px solid transparent;
-  font-size: 14px;
+  font-size: var(--na-fs-sm);
   font-weight: 600;
+  letter-spacing: 0.01em;
   cursor: pointer;
 }
 
+/* primary actions use non-photo blue, the palette's own "active state" color -- not a purple/
+   indigo AI default, and not the rust accent this replaces */
 .na-btn--primary {
-  background: var(--na-accent, #7c2d12);
+  background: var(--na-accent, #2b6cb0);
   color: #fff;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .na-btn--primary:hover:not(:disabled) {
-    background: var(--na-accent-hover, #601f0a);
+    background: var(--na-accent-hover, #1f5490);
   }
 }
 
 .na-btn--secondary {
   background: transparent;
-  border-color: var(--na-rule, #ddd6cb);
-  color: var(--na-ink, #1c1b1a);
+  border-color: var(--na-rule-strong, #99a4b3);
+  color: var(--na-ink, #0f1826);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .na-btn--secondary:hover:not(:disabled) {
-    background: var(--na-neutral-bg, #efeae1);
+    background: var(--na-neutral-bg, #e2e7ec);
   }
 }
 
@@ -367,8 +456,8 @@ a {
   background: none;
   border: none;
   padding: 0;
-  color: var(--na-accent, #7c2d12);
-  font-size: 14px;
+  color: var(--na-accent, #2b6cb0);
+  font-size: var(--na-fs-sm);
   font-weight: 600;
   text-decoration: underline;
   cursor: pointer;
@@ -377,10 +466,10 @@ a {
 
 .na-error {
   padding: 12px 14px;
-  border-radius: 4px;
-  background: var(--na-danger-bg, #fbe2df);
-  color: var(--na-danger, #a3241a);
-  font-size: 14px;
+  border-radius: var(--na-radius);
+  background: var(--na-danger-bg, #fbe2e2);
+  color: var(--na-danger-text, #b91c1c);
+  font-size: var(--na-fs-md);
 }
 
 .na-error p {
@@ -391,10 +480,10 @@ a {
   max-height: 240px;
   overflow: auto;
   padding: 10px;
-  border-radius: 4px;
-  background: var(--na-paper-raised, #fff);
-  color: var(--na-ink, #1c1b1a);
-  font-family: var(--font-geist-mono, monospace);
+  border-radius: var(--na-radius);
+  background: var(--na-paper-raised, #f8fafc);
+  color: var(--na-ink, #0f1826);
+  font-family: var(--font-mono, monospace);
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -411,26 +500,24 @@ a {
 }
 
 .na-progress-note {
-  font-size: 14px;
-  color: var(--na-ink-muted, #6b6660);
+  font-size: var(--na-fs-md);
+  color: var(--na-ink-muted, #5b6472);
 }
 
 .na-progress-track {
   position: relative;
   width: 100%;
   max-width: 280px;
-  height: 4px;
-  border-radius: 2px;
+  height: 3px;
   overflow: hidden;
-  background: var(--na-neutral-bg, #efeae1);
+  background: var(--na-neutral-bg, #e2e7ec);
 }
 
 .na-progress-bar {
   position: absolute;
   inset: 0;
   width: 35%;
-  border-radius: inherit;
-  background: var(--na-accent, #7c2d12);
+  background: var(--na-accent, #2b6cb0);
 }
 
 .na-progress-bar {
@@ -448,43 +535,45 @@ a {
 
 .na-paste-box {
   padding: 16px;
-  border: 1px solid var(--na-rule, #ddd6cb);
-  border-radius: 6px;
-  background: var(--na-paper-raised, #fff);
+  border: 1px solid var(--na-rule, #c7ced8);
+  border-radius: var(--na-radius);
+  background: var(--na-paper-raised, #f8fafc);
 }
 
 .na-feedback-box {
   padding: 16px;
-  border: 1px solid var(--na-rule, #ddd6cb);
-  border-radius: 6px;
-  background: var(--na-paper-raised, #fff);
+  border: 1px solid var(--na-rule, #c7ced8);
+  border-radius: var(--na-radius);
+  background: var(--na-paper-raised, #f8fafc);
 }
 
 /* wraps the approve/regenerate row + fabrication acknowledgement: a visible seam (top rule,
    breathing room) between "you're reviewing content" above and "you're now deciding" below --
-   the review step previously had no grouping at all, so the single most consequential action on
-   the page (Approve & compile) carried the same visual weight as every other row on the screen */
+   the single most consequential action on the page (Approve & compile) carries more visual
+   weight than every other row on the screen */
 .na-decision {
   display: flex;
   flex-direction: column;
   gap: 14px;
   padding-top: 20px;
-  border-top: 1px solid var(--na-rule, #ddd6cb);
+  border-top: 1px solid var(--na-rule, #c7ced8);
 }
 
+/* the acknowledgement is tied directly to the fabrication warning above it, so it reads with the
+   same correction-red semantics rather than a third "caution" hue the palette doesn't have */
 .na-fabrication-ack {
   padding: 14px 16px;
-  border-radius: 4px;
-  background: var(--na-warn-bg, #fbe9c8);
+  border-radius: var(--na-radius);
+  background: var(--na-danger-bg, #fbe2e2);
 }
 
 .na-fabrication-ack label {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  font-size: 14px;
+  font-size: var(--na-fs-md);
   font-weight: 500;
-  color: var(--na-warn, #6b3d05);
+  color: var(--na-danger-text, #b91c1c);
 }
 
 .na-fabrication-ack input[type="checkbox"] {
@@ -497,8 +586,9 @@ a {
 }
 
 .na-done-summary {
-  font-size: 16px;
-  color: var(--na-ink-muted, #6b6660);
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: var(--na-fs-lg);
+  color: var(--na-ink-muted, #5b6472);
 }
 
 /* ---- ReportCard (app/components/ReportCard.tsx) ------------------------------------------- */
@@ -506,54 +596,48 @@ a {
 .rc-root {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   padding: 20px;
-  border: 1px solid var(--na-rule, #ddd6cb);
-  border-radius: 6px;
-  background: var(--na-paper-raised, #fff);
+  border: 1px solid var(--na-rule, #c7ced8);
+  border-radius: var(--na-radius);
+  background: var(--na-paper-raised, #f8fafc);
 }
 
 .rc-heading {
   font-family: var(--font-serif, Georgia, serif);
-  font-size: var(--na-fs-heading-md);
+  font-size: var(--na-fs-xl);
   font-weight: 600;
 }
 
-.rc-subheading {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--na-ink-muted, #6b6660);
-  margin-top: 4px;
+.rc-empty {
+  font-size: var(--na-fs-sm);
+  color: var(--na-ink-muted, #5b6472);
 }
 
-.rc-empty,
-.rc-all-matched,
-.rc-unclaimed-note {
-  font-size: 13px;
-  color: var(--na-ink-muted, #6b6660);
-}
-
+/* "all matched" reads as a settled, fully-typeset state -- non-photo blue rather than a green
+   this palette doesn't have */
 .rc-all-matched {
-  color: var(--na-success, #1a7f37);
+  color: var(--na-accent-hover, #1f5490);
   font-weight: 600;
+  font-size: var(--na-fs-sm);
 }
 
 .rc-violations {
   padding: 12px 14px;
-  border-radius: 4px;
-  background: var(--na-warn-bg, #fbe9c8);
-  color: var(--na-warn, #6b3d05);
+  border-radius: var(--na-radius);
+  background: var(--na-danger-bg, #fbe2e2);
+  color: var(--na-danger-text, #b91c1c);
 }
 
 .rc-violations-title {
-  font-size: 14px;
+  font-size: var(--na-fs-md);
   font-weight: 700;
   margin-bottom: 6px;
 }
 
 .rc-violations-list {
   padding-left: 18px;
-  font-size: 13px;
+  font-size: var(--na-fs-sm);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -564,16 +648,15 @@ a {
 }
 
 /* the single highest-stakes state in the app: a term the model added that isn't verifiable
-   against the base résumé or the skills whitelist. Styled harder than .rc-violations (a routine,
-   fixable formatting warning) via a solid border and a dedicated chip treatment, and now driven
-   by the --na-danger tokens instead of a hardcoded hex pair -- the previous inline styles
-   (#fdecea/#b3261e/#611a15) never adapted for dark mode. */
+   against the base resume or the skills whitelist. Styled harder than .rc-violations (a routine,
+   fixable formatting warning) via a solid border, driven by the same --na-danger tokens so it
+   stays legible and on-palette in dark mode too. */
 .rc-fabrication-warning {
   padding: 14px 16px;
-  border-radius: 4px;
-  border: 1px solid var(--na-danger, #a3241a);
-  background: var(--na-danger-bg, #fbe2df);
-  color: var(--na-danger, #a3241a);
+  border-radius: var(--na-radius);
+  border: 1px solid var(--na-danger, #d92b2b);
+  background: var(--na-danger-bg, #fbe2e2);
+  color: var(--na-danger-text, #b91c1c);
 }
 
 .rc-fabrication-warning-title {
@@ -583,11 +666,6 @@ a {
 
 .rc-fabrication-warning-body {
   margin-bottom: 10px;
-}
-
-.rc-chip--fabricated {
-  background: var(--na-danger, #a3241a);
-  color: #fff;
 }
 
 .rc-scores {
@@ -603,57 +681,124 @@ a {
 }
 
 .rc-score label {
-  font-size: 12px;
+  font-size: var(--na-fs-xs);
   font-weight: 600;
-  color: var(--na-ink-muted, #6b6660);
+  letter-spacing: 0.02em;
+  color: var(--na-ink-muted, #5b6472);
 }
 
 .rc-score progress {
   width: 100%;
-  height: 10px;
-  accent-color: var(--na-accent, #7c2d12);
+  height: 4px;
+  accent-color: var(--na-accent, #2b6cb0);
 }
 
 .rc-score-value {
-  font-size: 13px;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--na-fs-sm);
   font-weight: 600;
 }
 
 .rc-delta {
-  font-size: 13px;
-  color: var(--na-ink-muted, #6b6660);
+  font-size: var(--na-fs-sm);
+  color: var(--na-ink-muted, #5b6472);
 }
 
-.rc-chip-list {
+/* ---- coverage grid (signature element): every extracted keyword rendered as one cell, colored
+   by its verified status. Replaces three separate chip lists with a single dense readout --
+   density over enumeration, matched to the brief's "precise, not maximalist" quality bar. */
+.rc-coverage-heading {
+  font-size: var(--na-fs-sm);
+  font-weight: 600;
+  color: var(--na-ink, #0f1826);
+}
+
+.rc-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 12px;
   list-style: none;
+  font-size: var(--na-fs-xs);
+  color: var(--na-ink-muted, #5b6472);
 }
 
-.rc-chip {
-  padding: 3px 10px;
-  /* same 4px radius scale as buttons/inputs/cards -- a pill shape here would be the only
-     maximally-rounded element on the page, not an intentional choice */
-  border-radius: 4px;
-  font-size: 12px;
+.rc-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rc-legend-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* hairline-separated cell grid: gap + a shared background is what draws the grid lines, the
+   same trick a printer's registration/color-separation swatch sheet uses */
+.rc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 1px;
+  list-style: none;
+  background: var(--na-rule, #c7ced8);
+  border: 1px solid var(--na-rule, #c7ced8);
+}
+
+.rc-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 6px 8px;
+  background: var(--na-paper-raised, #f8fafc);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--na-fs-xs);
+  line-height: 1.35;
+  overflow-wrap: break-word;
+}
+
+.rc-cell-mark {
+  flex: none;
+  font-weight: 700;
+}
+
+.rc-cell--matched {
+  background: var(--na-accent-bg, #dde8f3);
+  color: var(--na-accent-hover, #1f5490);
+}
+
+.rc-cell--missing-claimable {
+  color: var(--na-ink-muted, #5b6472);
+}
+
+.rc-cell--not-claimable {
+  background: var(--na-danger-bg, #fbe2e2);
+  color: var(--na-danger-text, #b91c1c);
+}
+
+/* fabricated: counted as "matched" by the model but flagged unverifiable -- rendered as matched
+   blue with a correction-red ring so it reads as "on the page, under correction," not a plain
+   third status the 3-item legend would have to explain */
+.rc-cell--fabricated {
+  background: var(--na-accent-bg, #dde8f3);
+  color: var(--na-danger-text, #b91c1c);
+  box-shadow: inset 0 0 0 1px var(--na-danger, #d92b2b);
+}
+
+.rc-cell--unknown {
+  color: var(--na-ink-muted, #5b6472);
+}
+
+.rc-num {
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
   font-weight: 600;
-}
-
-.rc-chip--matched {
-  background: var(--na-success-bg, #e7f3ea);
-  color: var(--na-success, #1a7f37);
-}
-
-.rc-chip--missing {
-  background: var(--na-neutral-bg, #efeae1);
-  color: var(--na-ink, #1c1b1a);
-}
-
-.rc-chip--unclaimed {
-  background: transparent;
-  border: 1px dashed var(--na-rule, #ddd6cb);
-  color: var(--na-ink-muted, #6b6660);
 }
 
 /* ---- DiffView (app/components/DiffView.tsx) ----------------------------------------------- */
@@ -666,44 +811,82 @@ a {
 
 .dv-heading {
   font-family: var(--font-serif, Georgia, serif);
-  font-size: var(--na-fs-heading-md);
+  font-size: var(--na-fs-xl);
   font-weight: 600;
 }
 
 .dv-legend {
-  font-size: 13px;
-  color: var(--na-ink-muted, #6b6660);
+  font-size: var(--na-fs-sm);
+  color: var(--na-ink-muted, #5b6472);
 }
 
+/* added = non-photo blue (structure, insertion); removed = correction red (destructive) --
+   the same two-color system as everywhere else in the app, not an arbitrary green/red data-viz
+   default */
 .dv-legend-added {
-  color: var(--na-success, #1a7f37);
+  color: var(--na-accent-hover, #1f5490);
   font-weight: 700;
 }
 
 .dv-legend-removed {
-  color: var(--na-danger, #a3241a);
+  color: var(--na-danger-text, #b91c1c);
   font-weight: 700;
 }
 
 .dv-empty {
-  font-size: 14px;
-  color: var(--na-ink-muted, #6b6660);
+  font-size: var(--na-fs-md);
+  color: var(--na-ink-muted, #5b6472);
+}
+
+/* general validator notes that can't be anchored to a tailored-tex line number (removed-line,
+   non-whitelisted-keyword, unparseable-response all omit `line` -- see lib/validator.ts /
+   lib/tailor.ts) -- pinned above the diff as a marginal note rather than dropped */
+.dv-marginalia-top {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--na-accent, #2b6cb0);
+  background: var(--na-danger-bg, #fbe2e2);
+  color: var(--na-danger-text, #b91c1c);
+  font-size: var(--na-fs-sm);
+}
+
+.dv-marginalia-top p {
+  margin: 0;
 }
 
 .dv-pre {
-  max-height: 480px;
+  max-height: 520px;
   overflow: auto;
   margin: 0;
-  padding: 12px;
-  border: 1px solid var(--na-rule, #ddd6cb);
-  border-radius: 6px;
-  background: var(--na-paper-raised, #fff);
-  font-family: var(--font-geist-mono, monospace);
+  padding: 0;
+  border: 1px solid var(--na-rule, #c7ced8);
+  border-radius: var(--na-radius);
+  background: var(--na-paper-raised, #f8fafc);
+  font-family: var(--font-mono, monospace);
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
+/* every row is a two-column grid (code | margin note) so a flagged line's note lands in a real
+   margin column, connected back to the line by the note's own left rule -- the signature
+   "correction marginalia" treatment. Unflagged rows simply leave the second column empty. */
 .dv-line {
+  display: grid;
+  /* the margin column only claims width on a flagged row (below) -- an unflagged row (the vast
+     majority) shouldn't force a wide empty gutter or push the pane into horizontal scroll */
+  grid-template-columns: minmax(0, 1fr) 0;
+  column-gap: 0;
+  padding: 1px 12px;
+}
+
+.dv-line--flagged {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+  background: var(--na-danger-bg, #fbe2e2);
+}
+
+.dv-code {
   display: flex;
   gap: 8px;
   white-space: pre-wrap;
@@ -716,18 +899,52 @@ a {
   font-weight: 700;
 }
 
-.dv-line--added {
-  background: var(--na-success-bg, #e7f3ea);
-  color: var(--na-success, #1a7f37);
+.dv-line--added .dv-sign,
+.dv-line--added .dv-text {
+  color: var(--na-accent-hover, #1f5490);
 }
 
-.dv-line--removed {
-  background: var(--na-danger-bg, #fbe2df);
-  color: var(--na-danger, #a3241a);
+.dv-line--removed .dv-sign,
+.dv-line--removed .dv-text {
+  color: var(--na-danger-text, #b91c1c);
 }
 
-.dv-line--same {
-  color: var(--na-ink-muted, #6b6660);
+.dv-line--same .dv-sign,
+.dv-line--same .dv-text {
+  color: var(--na-ink-muted, #5b6472);
+}
+
+/* the actual correction mark: the offending text underlined in correction red, same convention
+   a proofreader uses on paper */
+.dv-line--flagged .dv-text {
+  color: var(--na-danger-text, #b91c1c);
+  text-decoration: underline wavy var(--na-danger-text, #b91c1c);
+  text-decoration-thickness: 1px;
+}
+
+/* the margin note itself: connected to its line by a hairline (non-photo blue, the "structure"
+   color), while the note's own text stays correction red (the "violation" color) -- the two
+   colors keep their single meaning even inside one component */
+.dv-note {
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid var(--na-accent, #2b6cb0);
+  font-family: var(--font-sans, Arial, Helvetica, sans-serif);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--na-danger-text, #b91c1c);
+}
+
+.dv-note p {
+  margin: 0 0 2px;
+}
+
+.dv-note p:last-child {
+  margin-bottom: 0;
+}
+
+.dv-note-rule {
+  font-weight: 700;
 }
 
 /* Review-step tabs: LaTeX diff | PDF preview. Underline-style rather than boxed, so the active
@@ -735,7 +952,7 @@ a {
 .na-tabs {
   display: flex;
   gap: 4px;
-  border-bottom: 1px solid var(--na-rule, #ddd6cb);
+  border-bottom: 1px solid var(--na-rule, #c7ced8);
 }
 
 .na-tab {
@@ -745,46 +962,100 @@ a {
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   background: none;
-  color: var(--na-ink-muted, #6b6660);
-  font-size: 14px;
+  color: var(--na-ink-muted, #5b6472);
+  font-size: var(--na-fs-sm);
   font-weight: 600;
+  letter-spacing: 0.01em;
   cursor: pointer;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .na-tab:hover {
-    color: var(--na-ink, #1c1b1a);
+    color: var(--na-ink, #0f1826);
   }
 }
 
 .na-tab--active {
-  color: var(--na-ink, #1c1b1a);
-  border-bottom-color: var(--na-accent, #7c2d12);
+  color: var(--na-ink, #0f1826);
+  border-bottom-color: var(--na-accent, #2b6cb0);
 }
+
+/* ---- PdfPreview (app/components/PdfPreview.tsx) ------------------------------------------- */
 
 .pp-frame {
   width: 100%;
-  /* tall enough to read a page of résumé without scrolling the viewer inside the page, but
+  /* tall enough to read a page of resume without scrolling the viewer inside the page, but
      capped to the viewport so it doesn't run off-screen on a shorter laptop window */
   height: clamp(420px, 75vh, 720px);
-  border: 1px solid var(--na-rule, #ddd6cb);
-  border-radius: 6px;
-  background: var(--na-paper-raised, #fff);
+  display: block;
+  border: 1px solid var(--na-rule, #c7ced8);
+  background: var(--na-paper-raised, #f8fafc);
+}
+
+/* frames the compiled PDF like a press proof: corner registration marks + a "PROOF" running
+   label, sitting just outside the document rather than decorating it -- only shown once a real
+   PDF exists (loading/error states stay plain, see .pp-status/.na-error). */
+.pp-proof {
+  position: relative;
+  padding: 16px 14px 14px;
+}
+
+.pp-mark {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+
+.pp-mark--tl {
+  top: 2px;
+  left: 0;
+  border-top: 1px solid var(--na-rule-strong, #99a4b3);
+  border-left: 1px solid var(--na-rule-strong, #99a4b3);
+}
+
+.pp-mark--tr {
+  top: 2px;
+  right: 0;
+  border-top: 1px solid var(--na-rule-strong, #99a4b3);
+  border-right: 1px solid var(--na-rule-strong, #99a4b3);
+}
+
+.pp-mark--bl {
+  bottom: 0;
+  left: 0;
+  border-bottom: 1px solid var(--na-rule-strong, #99a4b3);
+  border-left: 1px solid var(--na-rule-strong, #99a4b3);
+}
+
+.pp-mark--br {
+  bottom: 0;
+  right: 0;
+  border-bottom: 1px solid var(--na-rule-strong, #99a4b3);
+  border-right: 1px solid var(--na-rule-strong, #99a4b3);
+}
+
+.pp-proof-label {
+  position: absolute;
+  top: -1px;
+  left: 20px;
+  padding: 0 4px;
+  background: var(--na-paper, #eef1f4);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--na-pencil, #8b96a5);
 }
 
 .pp-status {
   padding: 24px 0;
-  color: var(--na-ink-muted, #6b6660);
-  font-size: 14px;
+  color: var(--na-ink-muted, #5b6472);
+  font-size: var(--na-fs-md);
 }
 
-/* ---- Tracker (app/page.tsx) ---------------------------------------------------------------
-   Previously this page was styled entirely with inline style objects using the generic Next.js
-   scaffold tokens (--background/--foreground, i.e. plain white/black) and one-off hex colors,
-   never touching the ink & paper system at all -- the two pages of a two-page app looked like
-   they belonged to different products. This section brings the tracker onto the same tokens,
-   type scale, and component conventions (tr- prefix, matching na-/rc-/dv-/pp-) as the rest of
-   the app. app/page.module.css (the unused create-next-app scaffold file) is removed. */
+/* ---- Tracker (app/page.tsx) ---------------------------------------------------------------- */
 
 .tr-root {
   flex: 1;
@@ -792,8 +1063,8 @@ a {
   max-width: 1100px;
   margin: 0 auto;
   padding: 40px 24px 80px;
-  color: var(--na-ink, #1c1b1a);
-  background: var(--na-paper, #faf7f2);
+  color: var(--na-ink, #0f1826);
+  background: var(--na-paper, #eef1f4);
 }
 
 .tr-header {
@@ -806,27 +1077,27 @@ a {
 
 .tr-title {
   font-family: var(--font-serif, Georgia, serif);
-  font-size: var(--na-fs-heading-lg);
+  font-size: var(--na-fs-2xl);
   font-weight: 600;
   letter-spacing: -0.3px;
 }
 
 .tr-empty,
 .tr-loading {
-  font-size: 14px;
-  color: var(--na-ink-muted, #6b6660);
+  font-size: var(--na-fs-md);
+  color: var(--na-ink-muted, #5b6472);
 }
 
 .tr-empty {
   padding: 32px 24px;
-  border: 1px dashed var(--na-rule, #ddd6cb);
-  border-radius: 6px;
+  border: 1px dashed var(--na-rule-strong, #99a4b3);
+  border-radius: var(--na-radius);
   text-align: center;
 }
 
 .tr-empty a {
   font-weight: 600;
-  color: var(--na-accent, #7c2d12);
+  color: var(--na-accent, #2b6cb0);
   text-decoration: underline;
 }
 
@@ -837,19 +1108,19 @@ a {
   gap: 12px;
   padding: 12px 14px;
   margin-bottom: 20px;
-  border-radius: 4px;
-  background: var(--na-danger-bg, #fbe2df);
-  color: var(--na-danger, #a3241a);
-  font-size: 14px;
+  border-radius: var(--na-radius);
+  background: var(--na-danger-bg, #fbe2e2);
+  color: var(--na-danger-text, #b91c1c);
+  font-size: var(--na-fs-md);
 }
 
 .tr-retry-btn {
   flex: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--na-fs-sm);
   font-weight: 600;
   padding: 6px 12px;
-  border-radius: 4px;
+  border-radius: var(--na-radius);
   border: 1px solid currentColor;
   background: transparent;
   color: inherit;
@@ -874,12 +1145,11 @@ a {
 
 .tr-skeleton-row {
   height: 40px;
-  border-radius: 4px;
   background: linear-gradient(
     90deg,
-    var(--na-neutral-bg, #efeae1) 25%,
-    var(--na-paper-raised, #fff) 50%,
-    var(--na-neutral-bg, #efeae1) 75%
+    var(--na-neutral-bg, #e2e7ec) 25%,
+    var(--na-paper-raised, #f8fafc) 50%,
+    var(--na-neutral-bg, #e2e7ec) 75%
   );
   background-size: 200% 100%;
   animation: tr-skeleton-shimmer 1.6s ease-in-out infinite;
@@ -896,32 +1166,31 @@ a {
 
 .tr-table-wrap {
   overflow-x: auto;
-  border: 1px solid var(--na-rule, #ddd6cb);
-  border-radius: 6px;
+  border: 1px solid var(--na-rule, #c7ced8);
 }
 
 .tr-table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 14px;
+  font-size: var(--na-fs-md);
 }
 
 .tr-table th {
   text-align: left;
   padding: 10px 14px;
   white-space: nowrap;
-  background: var(--na-neutral-bg, #efeae1);
-  color: var(--na-ink-muted, #6b6660);
-  font-size: 12px;
+  background: var(--na-neutral-bg, #e2e7ec);
+  color: var(--na-ink-muted, #5b6472);
+  font-size: var(--na-fs-xs);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  border-bottom: 1px solid var(--na-rule, #ddd6cb);
+  border-bottom: 1px solid var(--na-rule, #c7ced8);
 }
 
 .tr-table td {
   padding: 12px 14px;
-  border-bottom: 1px solid var(--na-rule, #ddd6cb);
+  border-bottom: 1px solid var(--na-rule, #c7ced8);
   vertical-align: top;
 }
 
@@ -931,12 +1200,18 @@ a {
 
 @media (hover: hover) and (pointer: fine) {
   .tr-table tbody tr:hover td {
-    background: var(--na-neutral-bg, #efeae1);
+    background: var(--na-neutral-bg, #e2e7ec);
   }
 }
 
 .tr-table td:first-child {
   font-weight: 600;
+}
+
+/* mixed alpha+numeric readouts (dates) get tabular numerals without moving to the mono face --
+   see .na-num above for the pure-numeric case (scores) */
+.tr-num {
+  font-variant-numeric: tabular-nums;
 }
 
 .tr-links {
@@ -947,7 +1222,7 @@ a {
 }
 
 .tr-links a {
-  color: var(--na-accent, #7c2d12);
+  color: var(--na-accent, #2b6cb0);
   font-weight: 600;
 }
 
@@ -956,22 +1231,22 @@ a {
 }
 
 .tr-inline-error {
-  color: var(--na-danger, #a3241a);
+  color: var(--na-danger-text, #b91c1c);
   font-size: 12px;
   margin-top: 4px;
 }
 
 .tr-notes-field {
   font: inherit;
-  font-size: 13px;
+  font-size: var(--na-fs-sm);
   width: 100%;
   min-width: 160px;
   resize: vertical;
   padding: 6px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--na-rule, #ddd6cb);
-  background: var(--na-paper-raised, #fff);
-  color: var(--na-ink, #1c1b1a);
+  border-radius: var(--na-radius);
+  border: 1px solid var(--na-rule, #c7ced8);
+  background: var(--na-paper-raised, #f8fafc);
+  color: var(--na-ink, #0f1826);
 }
 
 .tr-notes-field:disabled {
@@ -980,14 +1255,74 @@ a {
 
 .tr-select {
   font: inherit;
-  font-size: 14px;
+  font-size: var(--na-fs-md);
   padding: 6px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--na-rule, #ddd6cb);
-  background: var(--na-paper-raised, #fff);
-  color: var(--na-ink, #1c1b1a);
+  border-radius: var(--na-radius);
+  border: 1px solid var(--na-rule, #c7ced8);
+  background: var(--na-paper-raised, #f8fafc);
+  color: var(--na-ink, #0f1826);
 }
 
 .tr-select:disabled {
   opacity: 0.6;
+}
+
+/* Overview ruler beside the diff: an editor-style map of where the changes are, so a long diff
+   does not have to be scrolled to find them. Marks are positioned by their fraction through the
+   line list, and a run of same-kind lines collapses into one taller mark. */
+.dv-scroller {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 10px;
+  gap: 4px;
+}
+
+.dv-ruler {
+  position: relative;
+  border: 1px solid var(--na-rule, #c7ced8);
+  background: var(--na-paper-raised, #f8fafc);
+  cursor: pointer;
+}
+
+.dv-ruler-mark {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  border-radius: 1px;
+}
+
+.dv-ruler-mark--added {
+  background: var(--na-accent, #2b6cb0);
+}
+
+.dv-ruler-mark--removed {
+  background: var(--na-danger, #d92b2b);
+}
+
+/* Zebra striping: every other application gets a slightly lifted ground so a wide row stays
+   readable across its full width. Uses the raised surface rather than a new tint, so the stripe
+   sits inside the existing elevation ladder in both themes. */
+.tr-table tbody tr:nth-child(even) {
+  background: var(--na-paper-raised, #f8fafc);
+}
+
+/* the role doubles as the link to the posting it came from */
+.tr-role-link {
+  color: var(--na-ink, #0f1826);
+  text-decoration: underline;
+  text-decoration-color: var(--na-rule-strong, #99a4b3);
+  text-underline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tr-role-link:hover {
+    color: var(--na-accent, #2b6cb0);
+    text-decoration-color: var(--na-accent, #2b6cb0);
+  }
+}
+
+.tr-ext {
+  margin-left: 4px;
+  font-size: 0.85em;
+  color: var(--na-rule-strong, #99a4b3);
 }

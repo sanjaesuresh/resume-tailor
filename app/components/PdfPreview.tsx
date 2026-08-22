@@ -87,10 +87,22 @@ export default function PdfPreview({ tex }: PdfPreviewProps) {
   }
 
   return (
-    <iframe
-      className="pp-frame"
-      src={state.url}
-      title="PDF preview of the tailored résumé"
-    />
+    // frames the compiled document like a press proof (corner registration marks + a "PROOF"
+    // running label) -- decorative only, so every mark is aria-hidden and the iframe itself
+    // carries the real accessible name
+    <div className="pp-proof">
+      <span className="pp-mark pp-mark--tl" aria-hidden="true" />
+      <span className="pp-mark pp-mark--tr" aria-hidden="true" />
+      <span className="pp-mark pp-mark--bl" aria-hidden="true" />
+      <span className="pp-mark pp-mark--br" aria-hidden="true" />
+      <span className="pp-proof-label" aria-hidden="true">
+        Proof
+      </span>
+      <iframe
+        className="pp-frame"
+        src={state.url}
+        title="PDF preview of the tailored resume"
+      />
+    </div>
   );
 }

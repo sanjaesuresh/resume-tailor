@@ -19,6 +19,30 @@ const STOPWORDS = new Set([
   "environment", "well", "works", "using", "use", "used", "skills", "skill",
   "solid", "familiarity", "requires", "required", "practices", "work",
   "years", "year", "plus", "including", "etc",
+  // ordinary English that survives the capitalized-token rule by opening a sentence or a bullet
+  // ("One of our...", "Everything we ship...") -- reported as bogus keywords from a real posting
+  "one", "two", "three", "everything", "anything", "something", "everyone",
+  "someone", "everywhere", "may", "might", "must", "also", "across", "within",
+  "while", "through", "before", "after", "during", "per", "via", "like",
+  "make", "makes", "making", "made", "help", "helps", "helping", "new", "next",
+  "best", "better", "great", "good", "high", "level", "time", "times", "day",
+  "days", "week", "weeks", "month", "months", "every", "many", "much", "able",
+  "want", "wants", "need", "needs", "get", "gets", "give", "gives", "take",
+  "takes", "come", "comes", "join", "joining", "please", "thank", "thanks",
+  // compensation / benefits / legal boilerplate -- the section filter in jobtext.ts removes most
+  // of it, but a stray mention inside a kept section should still never rank as a skill
+  "base", "pay", "salary", "salaries", "compensation", "bonus", "equity",
+  "benefits", "perks", "insurance", "dental", "vision", "medical", "range",
+  "offer", "offers", "apply", "application", "applicants", "applicant",
+  "employer", "employment", "employee", "employees", "opportunity", "eligible",
+  "company", "companies", "business", "people", "world", "mission", "culture",
+  "values", "diverse", "diversity", "inclusive", "inclusion", "regardless",
+  // contraction tails -- the tokenizer splits on the apostrophe, so "we've"/"you'll"/"don't"
+  // leave "ve"/"ll"/"don" behind, and they repeat often enough to rank
+  "ve", "ll", "re", "don", "doesn", "isn", "aren", "wasn", "weren", "won",
+  "didn", "couldn", "shouldn", "wouldn", "hasn", "haven", "let", "lets",
+  "folks", "today", "others", "often", "first", "second", "feel", "set",
+  "my", "me", "own", "yours", "ours",
 ]);
 
 // fixed dictionary of multi-word tech phrases -- deterministic and dependency-free per the
@@ -32,6 +56,22 @@ const TECH_PHRASES = [
   "natural language processing", "computer vision", "agile development",
   "project management", "distributed systems", "microservices architecture",
 ];
+
+// lowercase terms that are real ATS keywords but rarely appear capitalized, so the proper-noun
+// evidence test below would otherwise discard them. Deliberately small and technical -- this is a
+// dictionary of things a résumé can claim, not a general vocabulary.
+const TECH_TERMS = new Set([
+  "backend", "frontend", "fullstack", "full-stack", "api", "apis", "sdk",
+  "database", "databases", "sql", "nosql", "cloud", "devops", "ci", "cd",
+  "microservices", "serverless", "containers", "orchestration", "kubernetes",
+  "docker", "infrastructure", "pipeline", "pipelines", "deployment", "testing",
+  "debugging", "monitoring", "observability", "latency", "throughput",
+  "scalability", "scalable", "distributed", "concurrency", "caching",
+  "authentication", "authorization", "encryption", "security", "compiler",
+  "runtime", "algorithms", "networking", "performance", "reliability",
+  "accessibility", "typescript", "javascript", "python", "java", "golang",
+  "react", "graphql", "rest", "grpc", "postgres", "postgresql", "redis",
+]);
 
 const KEYWORD_CAP = 60;
 
@@ -78,6 +118,55 @@ function tokenize(loweredText: string): string[] {
   return raw.map(stripTokenBoundaryPunctuation).filter(Boolean);
 }
 
+// a token is "term-like" when the posting capitalizes it as a proper noun, it is tech-shaped,
+// or it is on the technical dictionary -- the three ways a word can be a skill rather than prose
+function isTermLike(word: string, properNouns: Set<string>): boolean {
+  if (properNouns.has(word) || TECH_TERMS.has(word)) return true;
+  return /\d/.test(word) || word.slice(1).includes(".") || /[+#]/.test(word);
+}
+
+interface CapitalizedToken {
+  word: string;
+  sentenceInitial: boolean;
+  techShaped: boolean;
+}
+
+// what a new sentence, bullet or heading looks like from behind. Scraped postings arrive with
+// whitespace collapsed, so line breaks are gone -- the bullet glyphs and terminal punctuation
+// are the only remaining evidence that a capital letter is positional rather than meaningful.
+const SENTENCE_BOUNDARY = /[.!?;:•·▪◦*|)\]\-–—]/;
+
+// every capitalized token, tagged with the two things that decide whether its capital means
+// anything: where it sits, and whether it looks like a technology regardless of position
+function capitalizedTokens(text: string): CapitalizedToken[] {
+  const tokens: CapitalizedToken[] = [];
+  const pattern = /[A-Z][A-Za-z0-9+#.]*/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text))) {
+    const raw = stripTokenBoundaryPunctuation(match[0]);
+    if (!raw) continue;
+
+    let i = match.index - 1;
+    while (i >= 0 && /\s/.test(text[i])) i--;
+    const prev = i >= 0 ? text[i] : "";
+
+    tokens.push({
+      word: raw.toLowerCase(),
+      sentenceInitial: prev === "" || SENTENCE_BOUNDARY.test(prev),
+      // a digit (S3), an internal dot (Node.js), a +/# (C++, C#), or an all-caps acronym (REST,
+      // SQL) -- shapes ordinary prose does not have, so position stops mattering
+      techShaped:
+        /\d/.test(raw) ||
+        raw.slice(1).includes(".") ||
+        /[+#]/.test(raw) ||
+        (raw.length >= 2 && raw === raw.toUpperCase()),
+    });
+  }
+
+  return tokens;
+}
+
 /**
  * Extracts a deduplicated, ranked list of candidate ATS keywords from a job description.
  * Combines: (a) known tech phrases + capitalized/proper-noun-looking tokens (counted even
@@ -114,13 +203,27 @@ export function extractKeywords(jobDescription: string): string[] {
   // tech names -- e.g. "Python", "Kubernetes" -- and count even if mentioned only once.
   // skip tokens that are fragments of already-matched phrases (e.g., "ci", "cd" when
   // "ci/cd" has already been matched).
-  const capitalMatches = jobDescription.match(/\b[A-Z][A-Za-z0-9]{1,}\b/g) || [];
-  for (const raw of capitalMatches) {
-    const word = raw.toLowerCase();
+  //
+  // A capital letter alone is far too weak a signal on its own: every sentence and every bullet
+  // opens with one, so "One of our values..." and "Everything we ship..." were being ranked
+  // alongside real technologies. A capitalized token only counts when it earns it -- by appearing
+  // somewhere that is NOT the start of a sentence or bullet, by being tech-shaped (a digit, an
+  // internal dot, +/#, or an all-caps acronym), or by recurring. Kubernetes mentioned once
+  // mid-sentence still counts; "Everything" opening three bullets never does.
+  for (const { word, sentenceInitial, techShaped } of capitalizedTokens(jobDescription)) {
     if (STOPWORDS.has(word) || word.length < 2) continue;
     if (phraseFragments.has(word)) continue;
+    if (sentenceInitial && !techShaped) continue;
     bump(word);
   }
+
+  // words the posting itself treats as proper nouns (capitalized somewhere other than a sentence
+  // opening) or that are tech-shaped -- the evidence the frequency rules below test against
+  const properNouns = new Set(
+    capitalizedTokens(jobDescription)
+      .filter((t) => !t.sentenceInitial || t.techShaped)
+      .map((t) => t.word)
+  );
 
   // (b) frequent non-stopword unigrams -- require a repeat so generic prose doesn't flood the list
   const rawWords = tokenize(lowered);
@@ -129,8 +232,12 @@ export function extractKeywords(jobDescription: string): string[] {
     if (STOPWORDS.has(w) || w.length < 2 || /^\d+$/.test(w)) continue;
     unigramCounts.set(w, (unigramCounts.get(w) || 0) + 1);
   }
+  // frequency alone is not evidence of a keyword -- prose repeats prose. A unigram must also
+  // look like a term: capitalized somewhere that isn't a sentence opening (so the posting itself
+  // treats it as a proper noun), tech-shaped, or on the small technical dictionary above. This is
+  // what stops "often", "folks" and "today" ranking beside "TypeScript".
   for (const [w, c] of unigramCounts) {
-    if (c >= 2) bump(w, c);
+    if (c >= 2 && isTermLike(w, properNouns)) bump(w, c);
   }
 
   // (b) frequent non-stopword bigrams, built from the unfiltered token stream so adjacency
@@ -144,8 +251,11 @@ export function extractKeywords(jobDescription: string): string[] {
     const bigram = `${first} ${second}`;
     bigramCounts.set(bigram, (bigramCounts.get(bigram) || 0) + 1);
   }
+  // a bigram earns its place if either half is a real term ("design system"), never on repetition
+  // alone ("interview process")
   for (const [bg, c] of bigramCounts) {
-    if (c >= 2) bump(bg, c);
+    const [first, second] = bg.split(" ");
+    if (c >= 2 && (isTermLike(first, properNouns) || isTermLike(second, properNouns))) bump(bg, c);
   }
 
   // rank by frequency (stable sort keeps deterministic ordering for ties), cap the list,

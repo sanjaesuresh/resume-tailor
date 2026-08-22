@@ -20,22 +20,69 @@ const RULE_LABELS: Record<TailorViolation["rule"], string> = {
   "unparseable-response": "Response error",
 };
 
-function KeywordChips({ keywords, tone }: { keywords: string[]; tone: "matched" | "missing" | "unclaimed" }) {
+type Coverage = "matched" | "fabricated" | "missing-claimable" | "not-claimable" | "unknown";
+
+// one glyph + one screen-reader phrase per coverage state, always paired with a color (never
+// color alone) -- the same rule DiffView's +/- markers already follow
+const COVERAGE_META: Record<Coverage, { glyph: string; label: string }> = {
+  matched: { glyph: "✓", label: "matched" }, // check mark
+  fabricated: { glyph: "!", label: "possibly fabricated -- review before approving" },
+  "missing-claimable": { glyph: "·", label: "missing, still claimable" }, // middle dot
+  "not-claimable": { glyph: "×", label: "not claimable -- not on your skills whitelist" }, // multiplication sign
+  unknown: { glyph: "?", label: "status unavailable" },
+};
+
+/**
+ * Signature "coverage grid": every keyword the ATS extractor found (lib/ats.ts's AtsReport)
+ * rendered as one cell, colored and glyphed by its real verified status -- never a fabricated
+ * or invented category, purely a classification of the report's own arrays.
+ */
+function classify(
+  keyword: string,
+  sets: {
+    matchedHonest: string[];
+    fabricated: string[];
+    missingClaimable: string[];
+    missingNotClaimable: string[];
+  }
+): Coverage {
+  // order matters: a fabricated term is technically present in matchedAfter but must never read
+  // as a plain "matched" cell, so it's checked first
+  if (sets.fabricated.includes(keyword)) return "fabricated";
+  if (sets.matchedHonest.includes(keyword)) return "matched";
+  if (sets.missingNotClaimable.includes(keyword)) return "not-claimable";
+  if (sets.missingClaimable.includes(keyword)) return "missing-claimable";
+  // defensive fallback only -- every real keyword should land in one of the four buckets above;
+  // this never fabricates a status, it just admits the report's arrays didn't account for it
+  return "unknown";
+}
+
+function CoverageGrid({ keywords, coverageOf }: { keywords: string[]; coverageOf: (kw: string) => Coverage }) {
   return (
-    <ul className={`rc-chip-list rc-chip-list--${tone}`}>
-      {keywords.map((kw) => (
-        <li key={kw} className={`rc-chip rc-chip--${tone}`}>
-          {kw}
-        </li>
-      ))}
+    <ul className="rc-grid" aria-label={`Keyword coverage, ${keywords.length} keyword${keywords.length === 1 ? "" : "s"}`}>
+      {keywords.map((kw) => {
+        const coverage = coverageOf(kw);
+        const meta = COVERAGE_META[coverage];
+        return (
+          <li key={kw} className={`rc-cell rc-cell--${coverage}`}>
+            <span className="rc-cell-mark" aria-hidden="true">
+              {meta.glyph}
+            </span>
+            <span>
+              {kw}
+              <span className="visually-hidden"> — {meta.label}</span>
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
 /**
  * Review-gate summary: validator warnings (if any), the before/after ATS keyword-match score,
- * and the matched/missing keyword breakdown -- the honest "not claimed" list is presented as
- * intentional (never fabricating a skill), not as a shortfall.
+ * and the keyword coverage grid -- the honest "not claimed" cells are presented as intentional
+ * (never fabricating a skill), not as a shortfall.
  */
 export default function ReportCard({ report, violations }: ReportCardProps) {
   // defensive: a malformed/partial `report` should render a clear fallback rather than throw --
@@ -55,9 +102,17 @@ export default function ReportCard({ report, violations }: ReportCardProps) {
   // (on the whitelist) so the two lists never overlap and each reads as a distinct, honest signal
   const missingClaimable = missing.filter((k) => !missingNotClaimable.includes(k));
   const delta = scoresAvailable ? scoreAfter - scoreBefore : 0;
-  // a fabricated term must never render as a legitimate "Matched" chip -- it gets its own hard
-  // warning block instead (below), so it's excluded from the matched list entirely
+  // a fabricated term must never render as a legitimate "Matched" cell -- it gets its own hard
+  // warning block instead (below) plus a hazard-ringed grid cell, never a plain matched cell
   const matchedAfterHonest = matchedAfter.filter((k) => !fabricatedAdded.includes(k));
+
+  const coverageOf = (kw: string) =>
+    classify(kw, {
+      matchedHonest: matchedAfterHonest,
+      fabricated: fabricatedAdded,
+      missingClaimable,
+      missingNotClaimable,
+    });
 
   return (
     <section aria-labelledby="report-heading" className="rc-root">
@@ -77,15 +132,9 @@ export default function ReportCard({ report, violations }: ReportCardProps) {
           <p className="rc-fabrication-warning-body">
             These terms appear in the tailored resume but were not in your original resume and are
             not on your skills whitelist -- they cannot be verified as skills you actually have.
-            Remove them or add them to your whitelist before approving.
+            Remove them or add them to your whitelist before approving. They&apos;re also flagged
+            in the coverage grid below.
           </p>
-          <ul className="rc-chip-list">
-            {fabricatedAdded.map((kw) => (
-              <li key={kw} className="rc-chip rc-chip--fabricated">
-                {kw}
-              </li>
-            ))}
-          </ul>
         </div>
       )}
 
@@ -128,43 +177,35 @@ export default function ReportCard({ report, violations }: ReportCardProps) {
             </div>
           </div>
           <p className="rc-delta">
-            {delta > 0 ? "+" : ""}
-            {delta} point{Math.abs(delta) === 1 ? "" : "s"} {delta >= 0 ? "gained" : "lost"} out of{" "}
-            {keywords.length} extracted keyword{keywords.length === 1 ? "" : "s"}.
+            <span className="rc-num">
+              {delta > 0 ? "+" : ""}
+              {delta}
+            </span>{" "}
+            point{Math.abs(delta) === 1 ? "" : "s"} {delta >= 0 ? "gained" : "lost"} out of{" "}
+            <span className="rc-num">{keywords.length}</span> extracted keyword
+            {keywords.length === 1 ? "" : "s"}.
           </p>
 
-          <h4 className="rc-subheading">
-            Matched ({matchedAfterHonest.length} of {keywords.length})
-          </h4>
-          {matchedAfterHonest.length === 0 ? (
-            <p className="rc-empty">No keywords matched yet.</p>
-          ) : (
-            <KeywordChips keywords={matchedAfterHonest} tone="matched" />
+          {missing.length === 0 && (
+            <p className="rc-all-matched">All extracted keywords are present in the tailored resume.</p>
           )}
 
-          {missing.length === 0 ? (
-            <p className="rc-all-matched">All extracted keywords are present in the tailored resume.</p>
-          ) : (
-            <>
-              {missingClaimable.length > 0 && (
-                <>
-                  <h4 className="rc-subheading">Still missing ({missingClaimable.length})</h4>
-                  <KeywordChips keywords={missingClaimable} tone="missing" />
-                </>
-              )}
-              {missingNotClaimable.length > 0 && (
-                <>
-                  <h4 className="rc-subheading">
-                    Not claimed ({missingNotClaimable.length})
-                  </h4>
-                  <p className="rc-unclaimed-note">
-                    Not added because they aren&apos;t on your skills whitelist -- never fabricated.
-                  </p>
-                  <KeywordChips keywords={missingNotClaimable} tone="unclaimed" />
-                </>
-              )}
-            </>
-          )}
+          <div>
+            <p id="coverage-heading" className="rc-coverage-heading">
+              Keyword coverage ({matchedAfterHonest.length} of {keywords.length} matched)
+            </p>
+            <ul className="rc-legend">
+              {(["matched", "missing-claimable", "not-claimable", "fabricated"] as Coverage[]).map((c) => (
+                <li key={c} className="rc-legend-item">
+                  <span className={`rc-legend-mark rc-cell--${c}`} aria-hidden="true">
+                    {COVERAGE_META[c].glyph}
+                  </span>
+                  {COVERAGE_META[c].label}
+                </li>
+              ))}
+            </ul>
+            <CoverageGrid keywords={keywords} coverageOf={coverageOf} />
+          </div>
         </>
       )}
     </section>

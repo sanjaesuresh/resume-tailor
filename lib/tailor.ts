@@ -1,6 +1,7 @@
 import fs from "fs";
 import { z } from "zod";
 import { BASE_RESUME_PATH, MODEL, PROVIDER, WHITELIST_PATH } from "./config";
+import { extractRelevantSections } from "./jobtext";
 import { formatCount, logger, startTimer, withHeartbeat } from "./log";
 import { getProvider, type ClaudeProvider } from "./provider";
 import { validateTailored, type Rule } from "./validator";
@@ -243,6 +244,18 @@ export async function tailorResume(
   opts: TailorOptions = {}
 ): Promise<TailorResult> {
   const log = logger("tailor");
+  // narrow the posting to the job itself before anything else sees it: the prompt, the retry
+  // messages, and the ATS keyword extraction all read from this. Benefits, pay bands, EEO
+  // boilerplate and "about us" are not the job, and letting them through put terms like
+  // "base pay" on the keyword list the résumé is scored against.
+  const focusedDescription = extractRelevantSections(jobDescription);
+  if (focusedDescription.length < jobDescription.length) {
+    log(
+      `posting narrowed to the role: ${formatCount(jobDescription.length)} → ` +
+        `${formatCount(focusedDescription.length)} chars`
+    );
+  }
+
   const baseTex = opts.baseTex ?? fs.readFileSync(BASE_RESUME_PATH, "utf-8");
   const whitelist = opts.whitelist ?? parseWhitelist(fs.readFileSync(WHITELIST_PATH, "utf-8"));
   // built lazily, and only when the caller didn't inject a fake, so tests never touch the
@@ -252,7 +265,7 @@ export async function tailorResume(
   let userMessage = buildInitialUserMessage(
     baseTex,
     whitelist,
-    jobDescription,
+    focusedDescription,
     opts.feedback,
     opts.previousTex
   );
@@ -293,7 +306,7 @@ export async function tailorResume(
       userMessage = buildRetryUserMessage(
         baseTex,
         whitelist,
-        jobDescription,
+        focusedDescription,
         "(no tex returned)",
         violations,
         opts.feedback,
@@ -318,7 +331,7 @@ export async function tailorResume(
     userMessage = buildRetryUserMessage(
       baseTex,
       whitelist,
-      jobDescription,
+      focusedDescription,
       parsed.tex,
       violations,
       opts.feedback,
@@ -332,7 +345,7 @@ export async function tailorResume(
     throw new Error("Claude did not return a parseable resume after all retries");
   }
 
-  const report = buildReport(jobDescription, baseTex, parsed.tex, whitelist);
+  const report = buildReport(focusedDescription, baseTex, parsed.tex, whitelist);
   log(
     `ATS ${report.scoreBefore} → ${report.scoreAfter} · ${report.matchedAfter.length}/${report.keywords.length} keywords matched` +
       (report.fabricatedAdded.length > 0

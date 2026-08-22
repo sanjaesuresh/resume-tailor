@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { extractDescription, extractJobPostingJsonLd, scrapeJob } from "../scrape";
+import {
+  extractDescription,
+  extractJobPostingJsonLd,
+  extractViaBoardAdapters,
+  normalizeJobUrl,
+  scrapeJob,
+} from "../scrape";
 
 // long enough to clear the 200-char minimum, so these fixtures exercise the real accept/reject path
 const JOB_BODY =
@@ -265,6 +271,266 @@ describe("extractDescription (schema.org JobPosting in linked data)", () => {
   });
 });
 
+describe("extractDescription (application-form noise)", () => {
+  it("ignores <select> options so a dropdown cannot outweigh the posting", () => {
+    // Lever's /apply page ships a ~3,300-entry university dropdown; before <select> was treated as
+    // noise it scored as the densest text on the page and became the "description"
+    const universities = Array.from(
+      { length: 400 },
+      (_, i) => `<option value="${i}">National Institute of Technology Campus Number ${i}</option>`
+    ).join("");
+    const html = `
+      <html>
+        <body>
+          <div class="posting"><p>${JOB_BODY}</p></div>
+          <form><select name="school">${universities}</select></form>
+        </body>
+      </html>
+    `;
+
+    const result = extractDescription(html);
+
+    expect(result).toContain("design and operate the services behind our payments");
+    expect(result).not.toContain("National Institute of Technology");
+  });
+});
+
+describe("normalizeJobUrl", () => {
+  it("drops Lever's /apply segment, where the form replaces the posting body", () => {
+    expect(normalizeJobUrl(new URL("https://jobs.lever.co/acme/abc-123/apply")).href).toBe(
+      "https://jobs.lever.co/acme/abc-123"
+    );
+  });
+
+  it("keeps the query string (aggregators append tracking params to the apply link)", () => {
+    expect(normalizeJobUrl(new URL("https://jobs.lever.co/acme/abc-123/apply?ref=Simplify")).href).toBe(
+      "https://jobs.lever.co/acme/abc-123?ref=Simplify"
+    );
+  });
+
+  it("leaves a Lever posting URL and other hosts untouched", () => {
+    expect(normalizeJobUrl(new URL("https://jobs.lever.co/acme/abc-123")).href).toBe(
+      "https://jobs.lever.co/acme/abc-123"
+    );
+    // "/apply" is the posting itself on plenty of other boards, so the rewrite must stay scoped
+    expect(normalizeJobUrl(new URL("https://careers.example.com/jobs/9/apply")).href).toBe(
+      "https://careers.example.com/jobs/9/apply"
+    );
+  });
+});
+
+describe("extractViaBoardAdapters", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // every adapter test drives the real fetch path through a stub, so the suite never touches the
+  // network; `calls` lets each test assert on the endpoint the adapter derived
+  function stubFetch(body: string, ok = true) {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok,
+      status: ok ? 200 : 404,
+      text: () => Promise.resolve(body),
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const SPA_SHELL = `<html><body><div id="root"></div></body></html>`;
+
+  it("reads an Oracle Fusion posting from the recruiting REST endpoint", async () => {
+    const fetchMock = stubFetch(
+      JSON.stringify({
+        items: [
+          {
+            Id: "155860",
+            Title: "Software Engineer I",
+            ExternalDescriptionStr: `<p>${JOB_BODY}</p>`,
+            ExternalResponsibilitiesStr: "<ul><li>Assist in the design and coding of features.</li></ul>",
+          },
+        ],
+      })
+    );
+
+    const result = await extractViaBoardAdapters(
+      new URL("https://ibqbjb.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/Honeywell/job/155860"),
+      SPA_SHELL
+    );
+
+    expect(result?.strategy).toBe("oracle-fusion");
+    expect(result?.text).toContain("Software Engineer I");
+    expect(result?.text).toContain("design and operate the services behind our payments");
+    const requested = String(fetchMock.mock.calls[0][0]);
+    expect(requested).toContain("/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails");
+    expect(requested).toContain("Id=%22155860%22");
+    expect(requested).toContain("siteNumber=%22Honeywell%22");
+  });
+
+  it("skips the Internal* copies so the requirements are not repeated", async () => {
+    stubFetch(
+      JSON.stringify({
+        items: [
+          {
+            Title: "Software Engineer I",
+            ExternalQualificationsStr: `<p>${JOB_BODY}</p>`,
+            InternalQualificationsStr: `<p>${JOB_BODY}</p>`,
+          },
+        ],
+      })
+    );
+
+    const result = await extractViaBoardAdapters(
+      new URL("https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_45001/job/340728"),
+      SPA_SHELL
+    );
+
+    const occurrences = result!.text.split("design and operate the services").length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it("reads a Greenhouse-embedded posting using gh_jid plus the board token in the page", async () => {
+    // greenhouse returns `content` as entity-escaped HTML, so the fixture escapes it the same way
+    const escaped = `&lt;p&gt;${JOB_BODY} We value ownership &amp;amp; craft.&lt;/p&gt;`;
+    const fetchMock = stubFetch(
+      JSON.stringify({ title: "Embedded Engineer", company_name: "DMC", content: escaped })
+    );
+    const html = `<html><body><div id="grnhse_app"></div>
+      <script src="https://boards.greenhouse.io/embed/job_board/js?for=dmcengineering"></script></body></html>`;
+
+    const result = await extractViaBoardAdapters(
+      new URL("https://www.dmcinfo.com/careers/open-positions?gh_jid=5136284008"),
+      html
+    );
+
+    expect(result?.strategy).toBe("greenhouse-embed");
+    expect(result?.text).toContain("Embedded Engineer at DMC");
+    expect(result?.text).toContain("ownership & craft");
+    expect(result?.text).not.toContain("&lt;");
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "https://boards-api.greenhouse.io/v1/boards/dmcengineering/jobs/5136284008?content=true"
+    );
+  });
+
+  it("does not guess a Greenhouse board token when the page never names one", async () => {
+    // Hudson River Trading is exactly this case: gh_jid in the URL, token injected by their own JS.
+    // A guessed token just 404s, so the adapter must decline rather than invent one.
+    const fetchMock = stubFetch("{}");
+
+    const result = await extractViaBoardAdapters(
+      new URL("https://www.hudsonrivertrading.com/careers/job/?gh_jid=8052050"),
+      `<html><body><div id="grnhse_app_new"></div></body></html>`
+    );
+
+    expect(result).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reads a BambooHR posting from the /detail endpoint beside the careers page", async () => {
+    const fetchMock = stubFetch(
+      JSON.stringify({
+        result: { jobOpening: { jobOpeningName: "Software Engineer - New Grad", description: `<p>${JOB_BODY}</p>` } },
+      })
+    );
+
+    const result = await extractViaBoardAdapters(
+      new URL("https://nexthopai.bamboohr.com/careers/24/"),
+      SPA_SHELL
+    );
+
+    expect(result?.strategy).toBe("bamboohr");
+    expect(result?.text).toContain("Software Engineer - New Grad");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("https://nexthopai.bamboohr.com/careers/24/detail");
+  });
+
+  it("follows a markdown alternate the page declares about itself", async () => {
+    const markdown = `# Deployed Software Engineer\n\n\n\n## Description\n\n${JOB_BODY}`;
+    const fetchMock = stubFetch(markdown);
+    const html = `<html><head>
+      <link rel="alternate" type="text/plain" href="/arondite/llms.txt"/>
+      <link rel="alternate" type="text/markdown" href="/arondite/jobs/view/5C5C551ADA.md"/>
+    </head><body><div id="root"></div></body></html>`;
+
+    const result = await extractViaBoardAdapters(
+      new URL("https://apply.workable.com/arondite/j/5C5C551ADA/apply"),
+      html
+    );
+
+    expect(result?.strategy).toBe("markdown-alternate");
+    // headings survive; only runs of blank lines are collapsed
+    expect(result?.text).toContain("# Deployed Software Engineer");
+    expect(result?.text).not.toContain("\n\n\n");
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "https://apply.workable.com/arondite/jobs/view/5C5C551ADA.md"
+    );
+  });
+
+  it("ignores an alternate link that is not markdown", async () => {
+    const fetchMock = stubFetch("irrelevant");
+    const html = `<html><head><link rel="alternate" type="application/rss+xml" href="/feed.xml"/></head></html>`;
+
+    expect(await extractViaBoardAdapters(new URL("https://example.com/job/1"), html)).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a derived endpoint that points at a private or metadata address", async () => {
+    // the markdown alternate's href comes from page content, so a hostile page could aim the
+    // scraper's second request at cloud metadata. The SSRF guards must cover it exactly as they
+    // cover the URL the user pasted.
+    const fetchMock = stubFetch("should never be fetched");
+    const hostile = `<html><head>
+      <link rel="alternate" type="text/markdown" href="http://169.254.169.254/latest/meta-data/iam/security-credentials/"/>
+    </head></html>`;
+
+    expect(await extractViaBoardAdapters(new URL("https://evil.example.com/job/1"), hostile)).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a derived endpoint on a non-http scheme", async () => {
+    const fetchMock = stubFetch("should never be fetched");
+    const hostile = `<html><head>
+      <link rel="alternate" type="text/markdown" href="file:///etc/passwd"/>
+    </head></html>`;
+
+    expect(await extractViaBoardAdapters(new URL("https://evil.example.com/job/1"), hostile)).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns null without fetching when no adapter recognises the page", async () => {
+    const fetchMock = stubFetch("{}");
+
+    expect(await extractViaBoardAdapters(new URL("https://careers.example.com/jobs/42"), SPA_SHELL)).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("falls through when the derived endpoint errors instead of failing the whole scrape", async () => {
+    const fetchMock = stubFetch("", false);
+
+    const result = await extractViaBoardAdapters(
+      new URL("https://nexthopai.bamboohr.com/careers/24"),
+      SPA_SHELL
+    );
+
+    expect(result).toBeNull();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("falls through when the endpoint returns JSON with no description in it", async () => {
+    stubFetch(JSON.stringify({ result: { jobOpening: { jobOpeningName: "Engineer", description: "" } } }));
+
+    expect(
+      await extractViaBoardAdapters(new URL("https://nexthopai.bamboohr.com/careers/24"), SPA_SHELL)
+    ).toBeNull();
+  });
+
+  it("falls through when the endpoint returns malformed JSON", async () => {
+    stubFetch("{ not json ]");
+
+    expect(
+      await extractViaBoardAdapters(new URL("https://nexthopai.bamboohr.com/careers/24"), SPA_SHELL)
+    ).toBeNull();
+  });
+});
+
 describe("scrapeJob", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -288,5 +554,66 @@ describe("scrapeJob", () => {
     if (!result.ok) {
       expect(result.error).toContain("Failed to fetch job posting");
     }
+  });
+
+  it("falls back to a board endpoint when the fetched page is an empty SPA shell", async () => {
+    const fetchMock = vi.fn(async (target: string) => {
+      const body = target.includes("/hcmRestApi")
+        ? JSON.stringify({ items: [{ Title: "Software Engineer I", ExternalDescriptionStr: `<p>${JOB_BODY}</p>` }] })
+        : `<html><body><div id="root"></div></body></html>`;
+      return { ok: true, status: 200, text: () => Promise.resolve(body) } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await scrapeJob(
+      "https://ibqbjb.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/Honeywell/job/155860"
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.description).toContain("design and operate the services behind our payments");
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("requests the normalized URL, not the aggregator's /apply deep link", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(`<html><body><main><p>${JOB_BODY}</p></main></body></html>`),
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await scrapeJob("https://jobs.lever.co/acme/abc-123/apply?ref=Simplify");
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe("https://jobs.lever.co/acme/abc-123?ref=Simplify");
+  });
+
+  it("still refuses a private/loopback host after the guard refactor", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const url of [
+      "http://169.254.169.254/latest/meta-data/",
+      "http://localhost:3000/job/1",
+      "http://0x7f.0.0.1/job/1",
+      "http://[::1]/job/1",
+    ]) {
+      const result = await scrapeJob(url);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain("private, loopback, or link-local");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a non-http scheme after the guard refactor", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await scrapeJob("file:///etc/passwd");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("Unsupported URL scheme");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

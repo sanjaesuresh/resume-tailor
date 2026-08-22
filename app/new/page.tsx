@@ -682,7 +682,7 @@ export default function NewApplicationPage() {
 
           <ReportCard report={state.report} violations={state.violations} />
 
-          <div className="na-tabs" role="tablist" aria-label="Résumé review">
+          <div className="na-tabs" role="tablist" aria-label="Resume review">
             {REVIEW_TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -710,7 +710,7 @@ export default function NewApplicationPage() {
             aria-labelledby="tab-latex"
             hidden={reviewTab !== "latex"}
           >
-            <DiffView baseTex={state.baseTex} tailoredTex={state.tex} />
+            <DiffView baseTex={state.baseTex} tailoredTex={state.tex} violations={state.violations} />
           </div>
           <div
             role="tabpanel"
