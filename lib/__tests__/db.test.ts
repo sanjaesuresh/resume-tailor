@@ -9,6 +9,7 @@ import {
   getApplication,
   updateApplication,
   claimOrphanApplications,
+  deleteApplication,
 } from "../db";
 
 // each test gets its own temp-file db path so tests never share state or clobber the real tracker.db;
@@ -145,6 +146,64 @@ describe("db", () => {
       // the row itself is untouched by the rejected cross-user update
       const fetched = getApplication(created.id, "user-1");
       expect(fetched?.status).toBe("applied");
+    });
+  });
+
+  describe("deleteApplication", () => {
+    it("deletes the caller's own row and hands it back for file cleanup", () => {
+      const dbPath = tempDbPath();
+      dbDir = path.dirname(dbPath);
+      getDb(dbPath);
+
+      const created = createApplication("user-1", {
+        company: "Acme",
+        role: "Engineer",
+        texPath: "/tmp/x/resume.tex",
+      });
+
+      const deleted = deleteApplication(created.id, "user-1");
+
+      // the row comes back so the caller knows which files to remove -- it is gone from the db
+      expect(deleted?.id).toBe(created.id);
+      expect(deleted?.texPath).toBe("/tmp/x/resume.tex");
+      expect(getApplication(created.id, "user-1")).toBeNull();
+      expect(listApplications("user-1")).toEqual([]);
+    });
+
+    it("refuses to delete another user's row, and leaves it intact", () => {
+      const dbPath = tempDbPath();
+      dbDir = path.dirname(dbPath);
+      getDb(dbPath);
+
+      const created = createApplication("user-1", { company: "Acme", role: "Engineer" });
+
+      expect(deleteApplication(created.id, "user-2")).toBeNull();
+      // still there for its actual owner -- a failed cross-user delete must not be destructive
+      expect(getApplication(created.id, "user-1")?.company).toBe("Acme");
+    });
+
+    it("answers a missing row and someone else's row identically", () => {
+      const dbPath = tempDbPath();
+      dbDir = path.dirname(dbPath);
+      getDb(dbPath);
+      const created = createApplication("user-1", { company: "Acme", role: "Engineer" });
+
+      // ids are sequential, so a distinguishable answer would confirm which ones exist
+      expect(deleteApplication(created.id, "user-2")).toBeNull();
+      expect(deleteApplication(999_999, "user-2")).toBeNull();
+    });
+
+    it("leaves the caller's other applications alone", () => {
+      const dbPath = tempDbPath();
+      dbDir = path.dirname(dbPath);
+      getDb(dbPath);
+
+      const first = createApplication("user-1", { company: "Acme", role: "Engineer" });
+      createApplication("user-1", { company: "Globex", role: "Engineer" });
+
+      deleteApplication(first.id, "user-1");
+
+      expect(listApplications("user-1").map((a) => a.company)).toEqual(["Globex"]);
     });
   });
 

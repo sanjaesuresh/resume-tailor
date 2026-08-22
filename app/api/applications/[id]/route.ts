@@ -1,10 +1,13 @@
 import {
+  deleteApplication,
   getApplication,
   toPublicApplication,
   updateApplication,
   type UpdateApplicationPatch,
 } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { removeApplicationFiles } from "@/lib/persist";
+import { logger } from "@/lib/log";
 
 function parseId(idParam: string): number | null {
   const id = Number(idParam);
@@ -95,4 +98,42 @@ export async function PATCH(
     }
     return Response.json({ error: "Failed to update application" }, { status: 500 });
   }
+}
+
+/**
+ * Removes an application and the resume files it produced. Irreversible: nothing here is
+ * soft-deleted, and the tex/pdf/report are gone from disk, so the UI confirms before calling it.
+ */
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireUser(request);
+  if (!auth.ok) return auth.response;
+
+  const { id: idParam } = await params;
+  const id = parseId(idParam);
+  if (id === null) {
+    return Response.json({ error: "Invalid application id" }, { status: 400 });
+  }
+
+  // the ownership scope lives in deleteApplication's WHERE clause, so another user's id simply
+  // does not match and comes back as a 404 -- the same answer a genuinely missing row gets
+  const deleted = deleteApplication(id, auth.user.id);
+  if (!deleted) {
+    return Response.json({ error: `Application ${id} not found` }, { status: 404 });
+  }
+
+  const log = logger("applications");
+  // best-effort, and deliberately after the row is already gone: if this throws, the user still
+  // sees the deletion they asked for and what is left behind is an orphaned directory nothing
+  // points at, rather than a visible row whose downloads 404
+  try {
+    const removed = removeApplicationFiles(auth.user.id, deleted.texPath ?? deleted.pdfPath);
+    log(`deleted #${id} · files ${removed ? "removed" : "not found on disk"}`);
+  } catch (err) {
+    log(`deleted #${id} · could not remove files: ${err instanceof Error ? err.message : err}`);
+  }
+
+  return Response.json({ deleted: toPublicApplication(deleted) });
 }

@@ -50,10 +50,10 @@ export default function SettingsDisplayNameSection({
 
   return (
     <section className="settings-section na-section">
-      <h2 className="rc-heading">Display name</h2>
+      <h2 className="rc-heading">Name</h2>
 
       <div className="na-field">
-        <label htmlFor="display-name">Display name</label>
+        <label htmlFor="display-name">Name</label>
         <input
           id="display-name"
           type="text"
@@ -67,8 +67,12 @@ export default function SettingsDisplayNameSection({
           disabled={saving}
           aria-describedby="display-name-hint"
         />
+        {/* the hyphen and the id come from downloadFilename, so the example has to match it
+            character for character -- an en dash here would show a filename nobody ever gets,
+            and the whole point of the example is to stop people typing the filename in */}
         <p id="display-name-hint" className="na-field-hint">
-          Used for the download filename a recruiter sees — e.g. “Resume – Jane Doe 42.pdf”.
+          Just your name — it goes on the file a recruiter downloads. Entering “Jane Doe” gives
+          you “Resume - Jane Doe 42.pdf”.
         </p>
       </div>
 

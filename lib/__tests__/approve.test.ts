@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { persistApplication, isValidReport } from "../persist";
+import { persistApplication, isValidReport, removeApplicationFiles } from "../persist";
 import { ASSETS_DIR } from "../config";
 // "@/" aliased import -- only resolvable now that vitest.config.ts maps it to the project root;
 // this import failing to load at all is the regression guard for that alias's absence
@@ -52,6 +52,76 @@ describe("persistApplication", () => {
     expect(application.pdfPath).toBe(
       path.join(dataDir, "applications", TEST_USER_ID, expectedSlug, "resume.pdf")
     );
+  });
+
+  describe("removeApplicationFiles", () => {
+    // this function ends in rmSync of a whole directory tree, driven by a path read out of the
+    // database -- these tests exist to pin the guards, not the happy path
+    function seed(userId: string, slug: string): string {
+      const dir = path.join(dataDir, "applications", userId, slug);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "resume.tex"), "x");
+      return path.join(dir, "resume.tex");
+    }
+
+    it("removes the application's own directory", () => {
+      dataDir = tempDataDir();
+      const texPath = seed(TEST_USER_ID, "acme-engineer-20260115");
+
+      expect(removeApplicationFiles(TEST_USER_ID, texPath, dataDir)).toBe(true);
+      expect(fs.existsSync(path.dirname(texPath))).toBe(false);
+    });
+
+    it("refuses a path inside another user's directory", () => {
+      dataDir = tempDataDir();
+      const victim = seed("otherUser123", "acme-engineer-20260115");
+
+      expect(removeApplicationFiles(TEST_USER_ID, victim, dataDir)).toBe(false);
+      expect(fs.existsSync(victim)).toBe(true);
+    });
+
+    it("refuses a path that escapes the data directory entirely", () => {
+      dataDir = tempDataDir();
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "resume-tailor-outside-"));
+      const file = path.join(outside, "resume.tex");
+      fs.writeFileSync(file, "x");
+
+      try {
+        expect(removeApplicationFiles(TEST_USER_ID, file, dataDir)).toBe(false);
+        expect(fs.existsSync(file)).toBe(true);
+      } finally {
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses to delete the user's whole applications directory", () => {
+      // a row whose stored path was the directory itself would otherwise take every application
+      // this user has, because path.dirname of it is the parent
+      dataDir = tempDataDir();
+      seed(TEST_USER_ID, "keep-me-20260115");
+      const userDir = path.join(dataDir, "applications", TEST_USER_ID);
+
+      expect(removeApplicationFiles(TEST_USER_ID, path.join(userDir, "anything"), dataDir)).toBe(
+        false
+      );
+      expect(fs.existsSync(path.join(userDir, "keep-me-20260115"))).toBe(true);
+    });
+
+    it("refuses a user id that is not shaped like one, before touching the filesystem", () => {
+      dataDir = tempDataDir();
+      const texPath = seed(TEST_USER_ID, "acme-engineer-20260115");
+
+      expect(removeApplicationFiles("../../etc", texPath, dataDir)).toBe(false);
+      expect(fs.existsSync(texPath)).toBe(true);
+    });
+
+    it("reports false rather than throwing when there is nothing on disk", () => {
+      dataDir = tempDataDir();
+      const missing = path.join(dataDir, "applications", TEST_USER_ID, "gone", "resume.tex");
+
+      expect(removeApplicationFiles(TEST_USER_ID, missing, dataDir)).toBe(false);
+      expect(removeApplicationFiles(TEST_USER_ID, null, dataDir)).toBe(false);
+    });
   });
 
   it("falls back to a random suffix instead of scanning forever past the collision cap", () => {

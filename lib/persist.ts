@@ -85,6 +85,36 @@ export function isValidReport(report: unknown): report is Record<string, unknown
 }
 
 /**
+ * Removes the slug directory a deleted application's files live in.
+ *
+ * The directory is derived from a path stored in the database, and this ends in an rmSync of a
+ * whole tree, so it is gated twice before deleting anything: the user id has to be shaped like an
+ * id, and the resolved directory has to sit strictly inside that user's own applications
+ * directory. A corrupted, restored, or hand-edited row therefore cannot make this delete another
+ * user's work or anything outside data/ -- it returns false instead.
+ *
+ * Returns whether a directory was actually removed, so the caller can log the difference between
+ * "cleaned up" and "there was nothing there", rather than reporting success either way.
+ */
+export function removeApplicationFiles(
+  userId: string,
+  storedPath: string | null,
+  dataDir?: string
+): boolean {
+  if (!storedPath || !SAFE_USER_ID.test(userId)) return false;
+
+  const userDir = path.resolve(path.join(dataDir ?? DATA_DIR, "applications", userId));
+  const appDir = path.resolve(path.dirname(storedPath));
+
+  // strictly inside, never equal: appDir === userDir would wipe every application this user has
+  if (!appDir.startsWith(userDir + path.sep)) return false;
+  if (!fs.existsSync(appDir)) return false;
+
+  fs.rmSync(appDir, { recursive: true, force: true });
+  return true;
+}
+
+/**
  * Writes a compiled resume + its ATS report to disk under a per-application slug directory,
  * and inserts the corresponding tracker row. The slug directory is the single source of truth
  * for where a given application's files live; the DB row just points at it.

@@ -221,6 +221,31 @@ export function updateApplication(
   return updated;
 }
 
+/**
+ * Deletes one of the caller's own applications and returns the row as it was, so the caller can
+ * clean up the files it pointed at. Returns null when the row does not exist OR belongs to someone
+ * else -- indistinguishable on purpose, exactly like getApplication, since ids are sequential and a
+ * different answer for "exists but not yours" would confirm which ids are real.
+ *
+ * The row goes first and the files after: a row pointing at files that are gone renders as a broken
+ * download in the tracker, whereas a leftover directory with no row is invisible garbage. Given one
+ * of the two has to happen if the second step fails, invisible garbage is the better failure.
+ */
+export function deleteApplication(id: number, userId: string): Application | null {
+  const conn = getDb();
+
+  return conn.transaction(() => {
+    const existing = getApplication(id, userId);
+    if (!existing) return null;
+
+    conn.prepare("DELETE FROM applications WHERE id = @id AND user_id = @user_id").run({
+      id,
+      user_id: userId,
+    });
+    return existing;
+  })();
+}
+
 function countAccounts(conn: Database.Database): number {
   const table = conn
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user'")
