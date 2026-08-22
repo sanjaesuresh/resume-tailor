@@ -847,7 +847,7 @@ export default function NewApplicationPage() {
             <a className="na-btn na-btn--secondary" href={state.texUrl}>
               View .tex
             </a>
-            <Link className="na-btn na-btn--secondary" href="/">
+            <Link className="na-btn na-btn--secondary" href="/applications">
               Go to tracker
             </Link>
             <button type="button" className="na-btn na-btn--secondary" onClick={() => dispatch({ type: "RESET" })}>

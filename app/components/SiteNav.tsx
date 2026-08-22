@@ -7,7 +7,7 @@ import { authClient } from "@/app/components/authClient";
 
 const LINKS = [
   { href: "/new", label: "New Application" },
-  { href: "/", label: "Tracker" },
+  { href: "/applications", label: "Tracker" },
   { href: "/settings", label: "Settings" },
 ];
 

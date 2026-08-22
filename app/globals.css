@@ -308,7 +308,7 @@ a {
 }
 
 .na-heading {
-  font-family: var(--font-serif, Georgia, serif);
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
   font-size: var(--na-fs-2xl);
   font-weight: 600;
   letter-spacing: -0.3px;
@@ -365,12 +365,12 @@ a {
   line-height: 1.5;
 }
 
-/* unslop-ignore: see app/layout.tsx's note on the document display face -- the job description
-   is manuscript copy being proofed, not a UI control, so it reads on the document face at a
+/* unslop-ignore: see app/layout.tsx's note on the display face -- the job description
+   is manuscript copy being proofed, not a UI control, so it reads on the display face at a
    comfortable line length, same as the diff/heading text, on the cool #eef1f4 proof-stock
    ground rather than a cream one */
 .na-field textarea {
-  font-family: var(--font-serif, Georgia, serif);
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
   font-size: var(--na-fs-lg);
   line-height: 1.5;
   resize: vertical;
@@ -586,7 +586,7 @@ a {
 }
 
 .na-done-summary {
-  font-family: var(--font-serif, Georgia, serif);
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
   font-size: var(--na-fs-lg);
   color: var(--na-ink-muted, #5b6472);
 }
@@ -604,7 +604,7 @@ a {
 }
 
 .rc-heading {
-  font-family: var(--font-serif, Georgia, serif);
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
   font-size: var(--na-fs-xl);
   font-weight: 600;
 }
@@ -810,7 +810,7 @@ a {
 }
 
 .dv-heading {
-  font-family: var(--font-serif, Georgia, serif);
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
   font-size: var(--na-fs-xl);
   font-weight: 600;
 }
@@ -1076,7 +1076,7 @@ a {
 }
 
 .tr-title {
-  font-family: var(--font-serif, Georgia, serif);
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
   font-size: var(--na-fs-2xl);
   font-weight: 600;
   letter-spacing: -0.3px;
@@ -1400,7 +1400,7 @@ a {
 }
 
 /* resume paste, tailoring prompt, and skills whitelist are code/data, not manuscript prose --
-   overrides the serif "document face" the shared .na-field textarea rule applies everywhere else
+   overrides the "display face" the shared .na-field textarea rule applies everywhere else
    (job description, feedback), which stays unslop-ignore'd for actual prose */
 .na-field textarea.na-mono {
   font-family: var(--font-mono, monospace);
@@ -1431,7 +1431,7 @@ a {
 }
 
 .settings-dialog-title {
-  font-family: var(--font-serif, Georgia, serif);
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
   font-size: var(--na-fs-lg);
   font-weight: 600;
   margin-bottom: 10px;
@@ -1441,4 +1441,96 @@ a {
   font-size: var(--na-fs-md);
   color: var(--na-ink-muted, #5b6472);
   margin-bottom: 20px;
+}
+
+/* Tracker row deletion. Two-step rather than a modal: the row is the context, and confirming
+   away from it is how you delete the wrong one. Quiet until armed -- an irreversible action
+   should not be the loudest thing in a table you are only reading. */
+.tr-delete {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.tr-delete-btn {
+  background: none;
+  border: 1px solid transparent;
+  padding: 0.15rem 0.35rem;
+  font-family: var(--font-sans);
+  font-size: var(--na-fs-xs);
+  color: var(--na-ink-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tr-delete-btn:hover:not(:disabled) {
+  color: var(--na-danger-text);
+  border-color: currentColor;
+}
+
+.tr-delete-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* armed: the destructive choice is the one that carries the colour, and the warning names the
+   files as well as the row, because those are gone too and nothing else says so */
+.tr-delete-btn--confirm {
+  color: var(--na-danger-text);
+  border-color: currentColor;
+  font-weight: 600;
+}
+
+.tr-delete-warning {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--na-fs-xs);
+  color: var(--na-danger-text);
+  max-width: 12ch;
+  line-height: 1.3;
+}
+
+/* ---- Landing page (app/page.tsx, app/components/FabricationDemo.tsx) ---------------------- */
+
+/* the fabrication-guard demo: same boxed-panel shape as .na-paste-box/.na-feedback-box (padding,
+   hairline border, raised surface) rather than a new card style, plus its own vertical rhythm
+   since it holds more children than either of those. Margin-top gives it breathing room below the
+   hero section -- .na-root is a plain block container, not a flex stack, so siblings need their
+   own spacing once there's more than one section on the page (every other .na-root page only ever
+   shows one section at a time). */
+.ld-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 32px;
+  padding: 20px;
+  border: 1px solid var(--na-rule, #c7ced8);
+  border-radius: var(--na-radius);
+  background: var(--na-paper-raised, #f8fafc);
+}
+
+/* the quoted resume bullet reads on the display face, same convention as .na-field textarea and
+   .na-done-summary -- it's manuscript content being demonstrated, not a UI control */
+.ld-demo-bullet {
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
+  font-size: var(--na-fs-lg);
+  line-height: 1.5;
+}
+
+/* inline highlight for a term inside the demo bullet -- resets the browser's default yellow
+   <mark> so both states stay on-palette. Matched uses the same accent tint as .rc-cell--matched;
+   flagged uses the same danger tint as .rc-cell--not-claimable (a term that's never been "matched
+   then corrected", so it does not get .rc-cell--fabricated's extra ring) */
+.ld-demo-term {
+  padding: 0 3px;
+  border-radius: var(--na-radius);
+  background: var(--na-accent-bg, #dde8f3);
+  color: var(--na-accent-hover, #1f5490);
+  font-weight: 600;
+}
+
+.ld-demo-term--flagged {
+  background: var(--na-danger-bg, #fbe2e2);
+  color: var(--na-danger-text, #b91c1c);
 }
