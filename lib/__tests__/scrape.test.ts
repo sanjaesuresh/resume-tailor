@@ -1,4 +1,5 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import dns from "dns";
 import {
   extractDescription,
   extractJobPostingJsonLd,
@@ -6,6 +7,22 @@ import {
   normalizeJobUrl,
   scrapeJob,
 } from "../scrape";
+
+// scrape.ts now resolves every fetch target's hostname before requesting it (SSRF hardening), so
+// any test that reaches an actual fetch call also triggers a dns.promises.lookup call -- stub it
+// module-wide so the suite never makes a real DNS query, and default every hostname to a public
+// address so existing (non-SSRF-focused) tests don't need to know this exists.
+vi.mock("dns", () => ({
+  default: { promises: { lookup: vi.fn() } },
+}));
+
+const dnsLookupMock = vi.mocked(dns.promises.lookup);
+const PUBLIC_ADDRESS = { address: "203.0.113.10", family: 4 };
+
+beforeEach(() => {
+  dnsLookupMock.mockReset();
+  dnsLookupMock.mockImplementation((() => Promise.resolve([PUBLIC_ADDRESS])) as unknown as typeof dns.promises.lookup);
+});
 
 // long enough to clear the 200-char minimum, so these fixtures exercise the real accept/reject path
 const JOB_BODY =
@@ -614,6 +631,133 @@ describe("scrapeJob", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("Unsupported URL scheme");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("scrapeJob (SSRF hardening: manual redirects and resolved-DNS checks)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function okResponse(body: string) {
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: () => Promise.resolve(body),
+    } as unknown as Response;
+  }
+
+  function redirectResponse(location: string) {
+    return {
+      ok: false,
+      status: 302,
+      headers: { get: (name: string) => (name.toLowerCase() === "location" ? location : null) },
+      text: () => Promise.resolve(""),
+    } as unknown as Response;
+  }
+
+  it("fetches normally when there is no redirect", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse(`<html><body><main><p>${JOB_BODY}</p></main></body></html>`)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await scrapeJob("https://public-host.example/job/1");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.description).toContain("design and operate the services");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows a single redirect between two public hosts", async () => {
+    const fetchMock = vi.fn(async (target: string) => {
+      const url = String(target);
+      if (url.includes("hop-a.example")) return redirectResponse("https://hop-b.example/job/1");
+      return okResponse(`<html><body><main><p>${JOB_BODY}</p></main></body></html>`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await scrapeJob("https://hop-a.example/job/1");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.description).toContain("design and operate the services");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // manual redirect mode: fetch must not be asked to follow the redirect itself
+    // the mock is declared with a single-param signature, so reach the init argument through the
+    // untyped call tuple rather than widening the mock and losing the target-string assertions
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(init.redirect).toBe("manual");
+  });
+
+  it("refuses a redirect chain that ends at a private address, checking every hop and not just the first", async () => {
+    const fetchMock = vi.fn(async (target: string) => {
+      const url = String(target);
+      if (url.includes("hop-a.example")) return redirectResponse("https://hop-b.example/job/1");
+      if (url.includes("hop-b.example")) return redirectResponse("http://169.254.169.254/latest/meta-data/");
+      throw new Error("must never reach the private hop");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await scrapeJob("https://hop-a.example/job/1");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("private, loopback, or link-local");
+    }
+    // both public hops were actually requested (proves per-hop checking, not just the first URL)
+    // and the private third hop was never fetched at all
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps redirect hops and fails clearly instead of following a chain forever", async () => {
+    // ping-pongs between two public hosts, so nothing here is blocked by the private-address
+    // check -- only the hop cap can end this
+    const fetchMock = vi.fn(async (target: string) => {
+      const url = String(target);
+      const next = url.includes("ping.example") ? "https://pong.example/job/1" : "https://ping.example/job/1";
+      return redirectResponse(next);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await scrapeJob("https://ping.example/job/1");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("Too many redirects");
+    // one initial request plus MAX_REDIRECTS (5) follows = 6 fetches before giving up
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("refuses a hostname that resolves to a private address even though the hostname itself looks public", async () => {
+    // e.g. attacker-controlled DNS, or a domain like 127.0.0.1.nip.io -- isBlockedHost's
+    // string checks pass, so only the resolved-address check catches this
+    dnsLookupMock.mockImplementation(
+      (() => Promise.resolve([{ address: "10.0.0.5", family: 4 }])) as unknown as typeof dns.promises.lookup
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await scrapeJob("https://looks-public.example.com/job/1");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("private, loopback, or link-local");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a host whose DNS record is an IPv4-mapped IPv6 loopback address", async () => {
+    // ::ffff:127.0.0.1 embeds 127.0.0.1 inside an IPv6 literal -- a common bypass for checkers
+    // that only pattern-match IPv6 prefixes and never look at the embedded IPv4 bytes
+    dnsLookupMock.mockImplementation(
+      (() => Promise.resolve([{ address: "::ffff:127.0.0.1", family: 6 }])) as unknown as typeof dns.promises.lookup
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await scrapeJob("https://looks-public.example.com/job/1");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("private, loopback, or link-local");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

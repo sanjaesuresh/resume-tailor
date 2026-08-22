@@ -1,3 +1,5 @@
+import dns from "dns";
+
 import { formatCount, logger, startTimer } from "./log";
 
 // minimum plain-text length before we trust an extraction; shorter results are usually
@@ -280,20 +282,48 @@ function isPrivateOrLoopbackIPv4(hostname: string): boolean {
   return false;
 }
 
+// dns.lookup can hand back an IPv4-mapped IPv6 literal in dotted ("::ffff:127.0.0.1") or hex
+// ("::ffff:7f00:1") form depending on platform/resolver -- normalize either to plain dotted-quad
+// so it goes through the same IPv4 range checks. This is a known SSRF-guard bypass: a checker that
+// only pattern-matches IPv6 prefixes misses the private address embedded inside.
+function ipv4MappedToDotted(addr: string): string | null {
+  const dotted = addr.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dotted) return dotted[1];
+  const hex = addr.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (!hex) return null;
+  const hi = parseInt(hex[1], 16);
+  const lo = parseInt(hex[2], 16);
+  return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+}
+
+// takes a bare (unbracketed) IPv6 literal, e.g. what dns.lookup returns or what's inside a URL's
+// "[...]" hostname -- shared by the URL-string check below and the DNS-resolved-address check
+function isPrivateOrLoopbackIPv6Address(addr: string): boolean {
+  const lower = addr.toLowerCase();
+  const mapped = ipv4MappedToDotted(lower);
+  if (mapped) return isPrivateOrLoopbackIPv4(mapped);
+  if (lower === "::1" || lower === "::") return true; // loopback / unspecified
+  if (lower.startsWith("fe80:")) return true; // fe80::/10 link-local
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // fc00::/7 unique local
+  return false;
+}
+
 function isPrivateOrLoopbackIPv6(hostname: string): boolean {
   // URL#hostname keeps IPv6 literals bracketed and lowercased, e.g. "[::1]"
   if (!hostname.startsWith("[") || !hostname.endsWith("]")) return false;
-  const addr = hostname.slice(1, -1);
-  if (addr === "::1" || addr === "::") return true; // loopback / unspecified
-  if (addr.startsWith("fe80:")) return true; // fe80::/10 link-local
-  if (addr.startsWith("fc") || addr.startsWith("fd")) return true; // fc00::/7 unique local
-  return false;
+  return isPrivateOrLoopbackIPv6Address(hostname.slice(1, -1));
 }
 
 function isBlockedHost(hostname: string): boolean {
   const lower = hostname.toLowerCase();
   if (lower === "localhost" || lower.endsWith(".localhost")) return true;
   return isPrivateOrLoopbackIPv4(lower) || isPrivateOrLoopbackIPv6(lower);
+}
+
+// checks one DNS-resolved address (unbracketed, exactly as dns.lookup returns it) against the
+// same private/loopback/link-local/unique-local ranges the string-based host check above enforces
+function isBlockedResolvedAddress(address: string, family: number): boolean {
+  return family === 6 ? isPrivateOrLoopbackIPv6Address(address) : isPrivateOrLoopbackIPv4(address);
 }
 
 type TargetCheck =
@@ -328,6 +358,98 @@ function checkFetchTarget(raw: string): TargetCheck {
     };
   }
   return { ok: true, url: parsed };
+}
+
+// how many redirect hops scrapeJob/fetchTextWithTimeout will follow before giving up -- generous
+// enough for normal aggregator/tracking redirects, tight enough that a redirect loop can't hang
+const MAX_REDIRECTS = 5;
+
+/**
+ * `checkFetchTarget` only looks at the hostname string, which is exactly what lets a hostname like
+ * `127.0.0.1.nip.io`, or any attacker-controlled DNS record, sail past every check and get resolved
+ * independently (and differently) by `fetch` a moment later. This resolves the hostname ourselves
+ * with every address it maps to (`all: true` -- an A/AAAA set can list a public address first and a
+ * private one second) and rejects if any of them is private/loopback/link-local/unique-local.
+ *
+ * What this does NOT close: DNS rebinding. Nothing pins the outbound connection to the address
+ * checked here, so a resolver that answers differently a few milliseconds later, when `fetch` does
+ * its own lookup, still gets through this gate. Closing that fully needs a custom undici dispatcher
+ * that connects to the exact address validated here rather than re-resolving -- out of scope for
+ * this change, and worth flagging rather than pretending the gap is gone.
+ */
+async function checkFetchTargetResolved(raw: string): Promise<TargetCheck> {
+  const basic = checkFetchTarget(raw);
+  if (!basic.ok) return basic;
+
+  // IPv6 URL hostnames stay bracketed ("[::1]"); dns.lookup wants the bare literal
+  const host = basic.url.hostname.startsWith("[")
+    ? basic.url.hostname.slice(1, -1)
+    : basic.url.hostname;
+
+  let addresses: { address: string; family: number }[];
+  try {
+    addresses = await dns.promises.lookup(host, { all: true });
+  } catch {
+    return { ok: false, error: "Could not resolve this URL's host", reason: `dns lookup failed for ${host}` };
+  }
+
+  for (const { address, family } of addresses) {
+    if (isBlockedResolvedAddress(address, family)) {
+      return {
+        ok: false,
+        error: "This URL points to a private, loopback, or link-local address and cannot be fetched",
+        reason: `refused private/loopback resolved address ${address} for host ${host}`,
+      };
+    }
+  }
+  return basic;
+}
+
+type GuardedFetchResult =
+  | { ok: true; response: Response; url: URL }
+  | { ok: false; error: string; reason: string };
+
+/**
+ * The only place in this module that calls the real `fetch`. Redirects are followed manually
+ * (`redirect: "manual"`) so every hop -- including the first -- passes the full scheme/host/DNS
+ * gate above before it's requested. Without this, a public host that 302s to
+ * `http://169.254.169.254/latest/meta-data/` (or any private address) would defeat every check
+ * above, since `fetch` follows redirects on its own by default and only the original URL was ever
+ * checked. A redirect to a blocked target fails with the same error a direct request to that
+ * target would produce.
+ */
+async function fetchGuarded(rawUrl: string, init: RequestInit): Promise<GuardedFetchResult> {
+  let current = rawUrl;
+  for (let redirects = 0; ; redirects++) {
+    const target = await checkFetchTargetResolved(current);
+    if (!target.ok) return target;
+
+    const response = await fetch(target.url.href, { ...init, redirect: "manual" });
+
+    const isRedirect = response.status >= 300 && response.status < 400;
+    const location = isRedirect ? response.headers.get("location") : null;
+    if (!location) return { ok: true, response, url: target.url };
+
+    if (redirects >= MAX_REDIRECTS) {
+      return {
+        ok: false,
+        error: "Too many redirects while fetching this URL",
+        reason: `exceeded ${MAX_REDIRECTS} redirect hops`,
+      };
+    }
+
+    // Location can be relative, so resolve it against the hop that issued it; the next loop
+    // iteration re-runs the full gate on the result before following it anywhere
+    try {
+      current = new URL(location, target.url).href;
+    } catch {
+      return {
+        ok: false,
+        error: "Redirect target could not be parsed",
+        reason: `invalid Location header "${location}"`,
+      };
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -542,15 +664,18 @@ async function fetchTextWithTimeout(url: URL): Promise<string | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(url.href, {
+    // fetchGuarded re-checks scheme/host/DNS on url itself and on every redirect hop it follows --
+    // a guard failure here (blocked target, too many redirects) is swallowed into null just like a
+    // network error, matching this function's existing failed-adapter-attempt contract
+    const result = await fetchGuarded(url.href, {
       headers: {
         "User-Agent": DESKTOP_USER_AGENT,
         Accept: "application/json, text/markdown;q=0.9, text/plain;q=0.8, */*;q=0.5",
       },
       signal: controller.signal,
     });
-    if (!response.ok) return null;
-    return await response.text();
+    if (!result.ok || !result.response.ok) return null;
+    return await result.response.text();
   } catch {
     return null;
   } finally {
@@ -595,10 +720,18 @@ export async function scrapeJob(url: string): Promise<ScrapeResult> {
   log(`GET ${parsed.hostname}${parsed.pathname}`);
 
   try {
-    const response = await fetch(parsed.href, {
+    // fetchGuarded re-runs the full scheme/host/DNS gate on parsed (redundant with the
+    // checkFetchTarget call above, but cheap) and again on every redirect hop it follows, so a
+    // public URL that 302s to a private/metadata address is refused just like requesting it directly
+    const guarded = await fetchGuarded(parsed.href, {
       headers: { "User-Agent": DESKTOP_USER_AGENT },
       signal: controller.signal,
     });
+    if (!guarded.ok) {
+      log(`✗ ${guarded.reason} · ${elapsed()}`);
+      return { ok: false, error: guarded.error };
+    }
+    const response = guarded.response;
 
     if (!response.ok) {
       log(`✗ ${response.status} · ${elapsed()}`);

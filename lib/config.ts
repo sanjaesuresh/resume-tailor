@@ -17,6 +17,12 @@ export const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.7-flas
 // rather than an obvious truncation. Headroom is far cheaper than diagnosing that twice.
 export const GEMINI_MAX_OUTPUT_TOKENS = Number(process.env.GEMINI_MAX_OUTPUT_TOKENS) || 32768;
 
+// input ceilings for the routes that hand user-supplied data to something expensive. A tailored
+// resume is ~10k chars, so both are generous headroom rather than a tight fit -- the point is that
+// an unbounded body reaches either a TeX engine or writeFileSync on the volume holding tracker.db.
+export const MAX_TEX_CHARS = 500_000;
+export const MAX_JOB_DESCRIPTION_CHARS = 200_000;
+
 // whose résumé this is -- used for the download filename a recruiter ends up seeing on disk.
 // Overridable via .env.local so a fork doesn't ship someone else's name.
 export const RESUME_OWNER_NAME = process.env.RESUME_OWNER_NAME?.trim() || "Sanjae Suresh";
