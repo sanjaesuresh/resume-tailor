@@ -6,21 +6,34 @@ import { createApiProvider, type ClaudeClient, type ClaudeParseParams } from "..
 const schema = z.object({ tex: z.string() });
 
 describe("resolveProviderName", () => {
-  it("defaults to the CLI (the subscription-billed path) when unset or empty", () => {
+  it("falls back to the CLI when nothing is set and there is no Gemini key", () => {
     expect(resolveProviderName(undefined)).toBe("cli");
     expect(resolveProviderName("")).toBe("cli");
     expect(resolveProviderName("   ")).toBe("cli");
   });
 
-  it("accepts either provider, case- and whitespace-insensitively", () => {
+  it("treats a Gemini key as the intent to use Gemini when nothing is set", () => {
+    expect(resolveProviderName(undefined, true)).toBe("gemini");
+    expect(resolveProviderName("", true)).toBe("gemini");
+  });
+
+  it("lets an explicit setting override the key-presence default", () => {
+    // otherwise you could never test the CLI path on a machine that has a Gemini key configured
+    expect(resolveProviderName("cli", true)).toBe("cli");
+    expect(resolveProviderName("api", true)).toBe("api");
+  });
+
+  it("accepts any provider, case- and whitespace-insensitively", () => {
     expect(resolveProviderName("api")).toBe("api");
     expect(resolveProviderName(" API ")).toBe("api");
     expect(resolveProviderName("CLI")).toBe("cli");
+    expect(resolveProviderName(" Gemini ")).toBe("gemini");
   });
 
-  it("throws on an unrecognized value rather than silently billing the other account", () => {
-    expect(() => resolveProviderName("anthropic")).toThrow(/Invalid CLAUDE_PROVIDER/);
-    expect(() => resolveProviderName("clii")).toThrow(/Invalid CLAUDE_PROVIDER/);
+  it("throws on an unrecognized value rather than silently billing another account", () => {
+    expect(() => resolveProviderName("anthropic")).toThrow(/Invalid LLM_PROVIDER/);
+    expect(() => resolveProviderName("clii")).toThrow(/Invalid LLM_PROVIDER/);
+    expect(() => resolveProviderName("google")).toThrow(/Invalid LLM_PROVIDER/);
   });
 });
 
@@ -30,26 +43,42 @@ describe("provider selection", () => {
     vi.resetModules();
   });
 
-  // config reads CLAUDE_PROVIDER once at module load, so selection can only be exercised by
-  // re-importing the module graph with the env var stubbed
-  async function loadProviderModule(value?: string) {
+  // config reads the env once at module load, so selection can only be exercised by re-importing
+  // the module graph with the vars stubbed
+  async function loadProviderModule(value?: string, geminiKey = "") {
     vi.resetModules();
-    if (value === undefined) vi.stubEnv("CLAUDE_PROVIDER", "");
-    else vi.stubEnv("CLAUDE_PROVIDER", value);
+    vi.stubEnv("LLM_PROVIDER", value ?? "");
+    vi.stubEnv("CLAUDE_PROVIDER", "");
+    vi.stubEnv("GEMINI_API_KEY", geminiKey);
     return import("../provider");
   }
 
-  it("reports the CLI as active by default", async () => {
+  it("reports the CLI as active when nothing is configured", async () => {
     const mod = await loadProviderModule();
     expect(mod.activeProviderName()).toBe("cli");
     expect(typeof mod.getProvider()).toBe("function");
   });
 
-  it("switches to the API provider when CLAUDE_PROVIDER=api", async () => {
+  it("switches to the API provider when LLM_PROVIDER=api", async () => {
     const mod = await loadProviderModule("api");
     expect(mod.activeProviderName()).toBe("api");
     // building it must not require a real key -- the SDK client is constructed on first call
     expect(typeof mod.getProvider()).toBe("function");
+  });
+
+  it("switches to Gemini on the key alone, and builds without touching the network", async () => {
+    const mod = await loadProviderModule(undefined, "test-key-not-real");
+    expect(mod.activeProviderName()).toBe("gemini");
+    expect(typeof mod.getProvider()).toBe("function");
+  });
+
+  it("still honours the old CLAUDE_PROVIDER name so an existing .env.local keeps working", async () => {
+    vi.resetModules();
+    vi.stubEnv("LLM_PROVIDER", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("CLAUDE_PROVIDER", "api");
+    const mod = await import("../provider");
+    expect(mod.activeProviderName()).toBe("api");
   });
 });
 

@@ -2,12 +2,13 @@ import { z } from "zod";
 import { PROVIDER, type ProviderName } from "./config";
 import { createApiProvider } from "./provider-api";
 import { createCliProvider } from "./provider-cli";
+import { createGeminiProvider } from "./provider-gemini";
 
 /**
- * The seam between this app and Claude: one structured-output call, described as a system
- * prompt, a user message, and the Zod schema the reply must satisfy. Two back ends implement
- * it -- the Anthropic API (metered credits) and the Claude Code CLI (Pro subscription) -- so
- * nothing above this line knows or cares which account is being billed.
+ * The seam between this app and the model: one structured-output call, described as a system
+ * prompt, a user message, and the Zod schema the reply must satisfy. Three back ends implement
+ * it -- the Google AI API, the Anthropic API (metered credits) and the Claude Code CLI (Pro
+ * subscription) -- so nothing above this line knows or cares which vendor is being billed.
  */
 export interface StructuredRequest<S extends z.ZodType> {
   system: string;
@@ -24,11 +25,12 @@ export type ClaudeProvider = <S extends z.ZodType>(
 ) => Promise<z.infer<S> | null>;
 
 /**
- * Builds the provider selected by config (env var `CLAUDE_PROVIDER`, default "cli").
- * Called lazily at the point of use so a run that never reaches Claude never constructs a
- * client or requires an API key / a logged-in CLI.
+ * Builds the provider selected by config (env var `LLM_PROVIDER`; defaults to "gemini" when a
+ * Gemini key is present, else "cli"). Called lazily at the point of use so a run that never
+ * reaches a model never constructs a client or requires an API key / a logged-in CLI.
  */
 export function getProvider(): ClaudeProvider {
+  if (PROVIDER === "gemini") return createGeminiProvider();
   return PROVIDER === "api" ? createApiProvider() : createCliProvider();
 }
 
