@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { authClient } from "@/app/components/authClient";
 
 const LINKS = [
+  { href: "/", label: "Home" },
   { href: "/new", label: "New Application" },
   { href: "/applications", label: "Tracker" },
   { href: "/settings", label: "Settings" },

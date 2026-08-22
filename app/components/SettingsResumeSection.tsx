@@ -197,7 +197,9 @@ export default function SettingsResumeSection({
             <button
               type="button"
               className="na-btn na-btn--secondary"
-              onClick={onGenerateWhitelist}
+              // wrapped, not passed directly: onClick would hand the MouseEvent to the first
+              // parameter, which is now the breadth setting
+              onClick={() => onGenerateWhitelist()}
               disabled={generatingWhitelist}
               aria-busy={generatingWhitelist || undefined}
             >

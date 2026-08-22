@@ -1491,46 +1491,608 @@ a {
   line-height: 1.3;
 }
 
-/* ---- Landing page (app/page.tsx, app/components/FabricationDemo.tsx) ---------------------- */
+/* ---- Landing page (app/page.tsx) ------------------------------------------------------- */
 
-/* the fabrication-guard demo: same boxed-panel shape as .na-paste-box/.na-feedback-box (padding,
-   hairline border, raised surface) rather than a new card style, plus its own vertical rhythm
-   since it holds more children than either of those. Margin-top gives it breathing room below the
-   hero section -- .na-root is a plain block container, not a flex stack, so siblings need their
-   own spacing once there's more than one section on the page (every other .na-root page only ever
-   shows one section at a time). */
-.ld-demo {
+.ld-root {
+  --ld-success: #2f7d32;
+  --ld-success-bg: #e3f3e5;
+  flex: 1;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 34px 24px 80px;
+  color: var(--na-ink, #0f1826);
+  background: var(--na-paper, #eef1f4);
+}
+
+.ld-hero {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(360px, 1.2fr);
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.ld-intro {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  margin-top: 32px;
-  padding: 20px;
+  gap: 18px;
+  padding-bottom: 2px;
+}
+
+.ld-title {
+  max-width: 480px;
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
+  font-size: var(--na-fs-2xl);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.3px;
+}
+
+.ld-posting {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
   border: 1px solid var(--na-rule, #c7ced8);
   border-radius: var(--na-radius);
   background: var(--na-paper-raised, #f8fafc);
 }
 
-/* the quoted resume bullet reads on the display face, same convention as .na-field textarea and
-   .na-done-summary -- it's manuscript content being demonstrated, not a UI control */
-.ld-demo-bullet {
+.ld-label {
+  font-size: var(--na-fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--na-ink-muted, #5b6472);
+}
+
+.ld-url {
+  padding: 10px 12px;
+  border: 1px solid var(--na-rule, #c7ced8);
+  border-radius: var(--na-radius);
+  background: var(--na-paper, #eef1f4);
+  color: var(--na-ink, #0f1826);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--na-fs-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.ld-scrape {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.8fr;
+  gap: 1px;
+  background: var(--na-rule, #c7ced8);
+  border: 1px solid var(--na-rule, #c7ced8);
+}
+
+.ld-scrape span {
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--na-neutral-bg, #e2e7ec);
+  font-size: var(--na-fs-sm);
+  font-weight: 600;
+  overflow-wrap: break-word;
+}
+
+.ld-workbench,
+.ld-review {
+  display: grid;
+  gap: 18px;
+}
+
+.ld-workbench {
+  grid-template-columns: minmax(280px, 0.86fr) minmax(380px, 1.14fr);
+  margin-bottom: 18px;
+}
+
+.ld-review {
+  grid-template-columns: minmax(220px, 0.75fr) minmax(300px, 1fr) minmax(260px, 0.9fr);
+  align-items: stretch;
+  margin-bottom: 18px;
+}
+
+.ld-panel,
+.ld-tracker {
+  min-width: 0;
+  border: 1px solid var(--na-rule, #c7ced8);
+  border-radius: var(--na-radius);
+  background: var(--na-paper-raised, #f8fafc);
+}
+
+.ld-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.ld-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--na-rule, #c7ced8);
+  background: var(--na-neutral-bg, #e2e7ec);
+}
+
+.ld-panel-head h2 {
   font-family: var(--font-display, "Arial Black", Arial, sans-serif);
   font-size: var(--na-fs-lg);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.ld-panel-head span {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--na-fs-xs);
+  font-weight: 600;
+  color: var(--na-ink-muted, #5b6472);
+}
+
+.ld-code {
+  flex: 1;
+  min-height: 238px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.ld-code code {
+  display: block;
+}
+
+.ld-code span {
+  display: inline-block;
+  width: 3ch;
+  margin-right: 10px;
+  color: var(--na-ink-muted, #5b6472);
+  font-variant-numeric: tabular-nums;
+}
+
+.ld-diff {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
   line-height: 1.5;
 }
 
-/* inline highlight for a term inside the demo bullet -- resets the browser's default yellow
-   <mark> so both states stay on-palette. Matched uses the same accent tint as .rc-cell--matched;
-   flagged uses the same danger tint as .rc-cell--not-claimable (a term that's never been "matched
-   then corrected", so it does not get .rc-cell--fabricated's extra ring) */
-.ld-demo-term {
-  padding: 0 3px;
-  border-radius: var(--na-radius);
-  background: var(--na-accent-bg, #dde8f3);
-  color: var(--na-accent-hover, #1f5490);
-  font-weight: 600;
+.ld-diff-row {
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--na-rule, #c7ced8);
 }
 
-.ld-demo-term--flagged {
+.ld-diff-row:last-child {
+  border-bottom: none;
+}
+
+.ld-diff-row code {
+  display: flex;
+  gap: 8px;
+}
+
+.ld-diff-row code span {
+  flex: none;
+  width: 1ch;
+  font-weight: 700;
+}
+
+.ld-diff-row--removed {
   background: var(--na-danger-bg, #fbe2e2);
   color: var(--na-danger-text, #b91c1c);
+}
+
+.ld-diff-row--added {
+  background: var(--ld-success-bg);
+  color: var(--ld-success);
+}
+
+.ld-diff-row--blocked {
+  background: var(--na-danger-bg, #fbe2e2);
+  color: var(--na-danger-text, #b91c1c);
+  box-shadow: inset 3px 0 0 var(--na-danger, #d92b2b);
+}
+
+.ld-diff-row p {
+  margin-left: 22px;
+  font-family: var(--font-sans, Arial, Helvetica, sans-serif);
+  font-size: var(--na-fs-xs);
+  font-weight: 700;
+}
+
+.ld-panel--validator {
+  padding-bottom: 12px;
+}
+
+.ld-verdict {
+  margin: 12px 12px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--na-danger, #d92b2b);
+  border-radius: var(--na-radius);
+  background: var(--na-danger-bg, #fbe2e2);
+  color: var(--na-danger-text, #b91c1c);
+  font-weight: 700;
+}
+
+.ld-fact {
+  margin: 0 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--na-rule, #c7ced8);
+  font-size: var(--na-fs-sm);
+}
+
+.ld-fact:last-child {
+  border-bottom: none;
+}
+
+.ld-score {
+  height: 6px;
+  margin: 16px 12px 14px;
+  background: var(--na-neutral-bg, #e2e7ec);
+}
+
+.ld-score span {
+  display: block;
+  height: 100%;
+  background: var(--na-accent, #2b6cb0);
+}
+
+.ld-keywords {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0 12px 12px;
+  padding: 0;
+  border: 1px solid var(--na-rule, #c7ced8);
+  background: var(--na-rule, #c7ced8);
+  list-style: none;
+}
+
+.ld-keyword {
+  padding: 7px 8px;
+  background: var(--na-paper-raised, #f8fafc);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--na-fs-xs);
+  overflow-wrap: break-word;
+}
+
+.ld-keyword--matched {
+  background: var(--na-accent-bg, #dde8f3);
+  color: var(--na-accent-hover, #1f5490);
+}
+
+.ld-keyword--blocked {
+  background: var(--na-danger-bg, #fbe2e2);
+  color: var(--na-danger-text, #b91c1c);
+}
+
+.ld-pdf {
+  padding-bottom: 12px;
+}
+
+.ld-paper {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px;
+  padding: 18px 16px;
+  border: 1px solid var(--na-rule, #c7ced8);
+  background: var(--na-paper, #eef1f4);
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
+  font-size: var(--na-fs-sm);
+  line-height: 1.45;
+}
+
+.ld-paper-name {
+  font-size: var(--na-fs-xl);
+  font-weight: 600;
+  text-align: center;
+}
+
+.ld-paper hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--na-rule-strong, #99a4b3);
+}
+
+.ld-tracker {
+  overflow: hidden;
+}
+
+.ld-table-wrap {
+  overflow-x: auto;
+}
+
+.ld-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: var(--na-fs-sm);
+}
+
+.ld-table th,
+.ld-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--na-rule, #c7ced8);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ld-table th {
+  background: var(--na-neutral-bg, #e2e7ec);
+  color: var(--na-ink-muted, #5b6472);
+  font-size: var(--na-fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ld-table tbody tr {
+  background: var(--na-paper-raised, #f8fafc);
+}
+
+.ld-table tbody td:first-child,
+.ld-table tbody td:nth-child(3) {
+  font-weight: 700;
+}
+
+.ld-table tbody td:last-child {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--na-fs-xs);
+  color: var(--na-accent-hover, #1f5490);
+}
+
+@media (max-width: 900px) {
+  .ld-hero,
+  .ld-workbench,
+  .ld-review {
+    grid-template-columns: 1fr;
+  }
+
+  .ld-scrape {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .ld-root {
+    --ld-success: #8fd694;
+    --ld-success-bg: #17341d;
+  }
+}
+
+@media (max-width: 560px) {
+  .ld-root {
+    padding: 28px 16px 64px;
+  }
+
+  .ld-title {
+    font-size: 29px;
+  }
+
+  .ld-keywords {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Landing walkthrough overrides -------------------------------------------------------- */
+
+.ld-root--guide {
+  padding-top: 48px;
+}
+
+.ld-hero--guide {
+  grid-template-columns: minmax(320px, 1fr) minmax(260px, 0.44fr);
+  align-items: center;
+  gap: 56px;
+  margin-bottom: 56px;
+  padding-bottom: 36px;
+  border-bottom: 1px solid var(--na-rule, #c7ced8);
+}
+
+.ld-hero-note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--na-rule, #c7ced8);
+}
+
+.ld-hero-note p {
+  max-width: 28ch;
+  color: var(--na-ink-muted, #5b6472);
+  font-size: var(--na-fs-lg);
+  line-height: 1.45;
+}
+
+.ld-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 64px;
+}
+
+.ld-guide-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.34fr) minmax(0, 0.66fr);
+  gap: 46px;
+  align-items: start;
+  padding-bottom: 64px;
+  border-bottom: 1px solid var(--na-rule, #c7ced8);
+}
+
+.ld-guide-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.ld-step-copy {
+  position: sticky;
+  top: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ld-step-copy h2 {
+  font-family: var(--font-display, "Arial Black", Arial, sans-serif);
+  font-size: var(--na-fs-xl);
+  font-weight: 600;
+  line-height: 1.22;
+}
+
+.ld-step-copy p:last-child {
+  max-width: 32ch;
+  color: var(--na-ink-muted, #5b6472);
+  font-size: var(--na-fs-md);
+  line-height: 1.55;
+}
+
+.ld-workbench--guide {
+  grid-template-columns: 1fr;
+  gap: 22px;
+  margin-bottom: 0;
+}
+
+.ld-review--guide {
+  grid-template-columns: minmax(260px, 0.9fr) minmax(260px, 1.1fr);
+  gap: 22px;
+  margin-bottom: 0;
+}
+
+.ld-guide .ld-posting,
+.ld-guide .ld-panel,
+.ld-guide .ld-tracker {
+  box-shadow: 0 12px 0 var(--na-neutral-bg, #e2e7ec);
+}
+
+.ld-guide .ld-panel-head {
+  padding: 12px 14px;
+}
+
+.ld-guide .ld-code {
+  min-height: 180px;
+}
+
+.ld-guide .ld-diff-row {
+  padding: 12px 14px;
+}
+
+.ld-guide .ld-verdict {
+  margin-top: 18px;
+}
+
+.ld-guide .ld-table th,
+.ld-guide .ld-table td {
+  padding: 14px 16px;
+}
+
+@media (max-width: 900px) {
+  .ld-hero--guide,
+  .ld-guide-row,
+  .ld-review--guide {
+    grid-template-columns: 1fr;
+  }
+
+  .ld-hero--guide {
+    gap: 28px;
+    margin-bottom: 44px;
+  }
+
+  .ld-guide {
+    gap: 48px;
+  }
+
+  .ld-guide-row {
+    gap: 22px;
+    padding-bottom: 48px;
+  }
+
+  .ld-step-copy {
+    position: static;
+  }
+}
+
+@media (max-width: 560px) {
+  .ld-root--guide {
+    padding-top: 34px;
+  }
+
+  .ld-hero--guide {
+    margin-bottom: 36px;
+    padding-bottom: 28px;
+  }
+
+  .ld-guide {
+    gap: 38px;
+  }
+
+  .ld-guide-row {
+    padding-bottom: 38px;
+  }
+}
+
+/* Whitelist breadth slider. Three labelled stops, and the label sits next to the control rather
+   than under it -- the setting is meaningless without knowing which stop you are on, so it never
+   renders as a bare track. */
+.wl-breadth {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 14rem) 1fr;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.wl-breadth label {
+  font-family: var(--font-sans);
+  font-size: var(--na-fs-sm);
+  color: var(--na-ink);
+  white-space: nowrap;
+}
+
+.wl-breadth input[type="range"] {
+  width: 100%;
+  accent-color: var(--na-accent);
+}
+
+.wl-breadth-label {
+  font-family: var(--font-mono);
+  font-size: var(--na-fs-xs);
+  color: var(--na-ink-muted);
+}
+
+/* the note spans the full row: it carries the consequence of the current stop, which is the part
+   that actually needs reading */
+.wl-breadth .na-field-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+@media (max-width: 34rem) {
+  .wl-breadth {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* the static half of the breadth explainer -- what the control does, as opposed to the note
+   under the track, which says what the current stop costs you */
+.wl-breadth-how {
+  margin: 0.75rem 0 0;
+  font-family: var(--font-sans);
+  font-size: var(--na-fs-sm);
+  color: var(--na-ink-muted);
+  max-width: 62ch;
+  line-height: 1.5;
 }

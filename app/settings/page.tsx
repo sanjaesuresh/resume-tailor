@@ -7,6 +7,7 @@ import SettingsResumeSection from "@/app/components/SettingsResumeSection";
 import SettingsWhitelistSection from "@/app/components/SettingsWhitelistSection";
 import SettingsPromptSection from "@/app/components/SettingsPromptSection";
 import SettingsDisplayNameSection from "@/app/components/SettingsDisplayNameSection";
+import type { WhitelistBreadth } from "@/lib/prompts/whitelist";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -69,11 +70,18 @@ export default function SettingsPage() {
     }
   }, [settings]);
 
-  async function handleGenerateWhitelist() {
+  // breadth defaults to the narrowest width. Widening this is widening what the tailoring
+  // pipeline is allowed to write into a resume, so it is a thing the user reaches for, never a
+  // thing they arrive at.
+  async function handleGenerateWhitelist(breadth: WhitelistBreadth = 1) {
     setGeneratingWhitelist(true);
     setGenerateWhitelistError(null);
     try {
-      const res = await fetch("/api/settings/whitelist/generate", { method: "POST" });
+      const res = await fetch("/api/settings/whitelist/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ breadth }),
+      });
       if (res.status === 401) {
         goToSignIn();
         return;
