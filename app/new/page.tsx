@@ -2,6 +2,7 @@
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { AtsReport } from "@/lib/ats";
 import type { TailorViolation } from "@/lib/tailor";
 import ReportCard from "@/app/components/ReportCard";
@@ -260,6 +261,17 @@ async function safeJson(res: Response): Promise<Record<string, unknown> | null> 
   return res.json().catch(() => null);
 }
 
+/**
+ * Whether this response means "your session is gone" rather than "the request failed".
+ *
+ * Checked at every step of the flow, not just the first: a session can expire during the ~20s a
+ * tailoring run takes, and showing "Could not fetch this job posting" for an expired cookie sends
+ * the user off debugging the wrong thing entirely.
+ */
+function isUnauthorized(res: Response): boolean {
+  return res.status === 401;
+}
+
 // mirrors the shape checks every other tailor-response field already gets -- without this, a 200
 // with a missing/malformed `report` would sail past `res.ok` and crash ReportCard's unguarded
 // destructure at render time (no error.tsx boundary exists to catch it). `scoreAfter: 0` is a
@@ -329,6 +341,7 @@ export default function NewApplicationPage() {
   // across every Fast Refresh, so the initial `true` is only ever applied once. Without setting it
   // back here, the first cleanup latches it to false forever and every fetch result is silently
   // discarded -- the page sticks on "Fetching…"/"Tailoring…" with no error, in dev only.
+  const router = useRouter();
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -359,6 +372,7 @@ export default function NewApplicationPage() {
         body: JSON.stringify({ url: trimmed }),
       });
       const data = await safeJson(res);
+      if (isUnauthorized(res)) { router.push("/signin"); return; }
       if (!mountedRef.current) return;
       if (res.ok && typeof data?.description === "string") {
         dispatch({ type: "SCRAPE_SUCCESS", description: data.description });
@@ -383,6 +397,7 @@ export default function NewApplicationPage() {
         body: JSON.stringify({ jobDescription, ...opts }),
       });
       const data = await safeJson(res);
+      if (isUnauthorized(res)) { router.push("/signin"); return; }
       if (!mountedRef.current) return;
       if (
         res.ok &&
@@ -452,6 +467,7 @@ export default function NewApplicationPage() {
         }),
       });
       const data = await safeJson(res);
+      if (isUnauthorized(res)) { router.push("/signin"); return; }
       if (!mountedRef.current) return;
       const application = data?.application as { id?: number } | undefined;
       if (res.ok && typeof data?.pdfUrl === "string" && typeof application?.id === "number") {

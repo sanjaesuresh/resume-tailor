@@ -1,4 +1,10 @@
-import { getApplication, updateApplication, type UpdateApplicationPatch } from "@/lib/db";
+import {
+  getApplication,
+  toPublicApplication,
+  updateApplication,
+  type UpdateApplicationPatch,
+} from "@/lib/db";
+import { requireUser } from "@/lib/auth";
 
 function parseId(idParam: string): number | null {
   const id = Number(idParam);
@@ -6,34 +12,43 @@ function parseId(idParam: string): number | null {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireUser(request);
+  if (!auth.ok) return auth.response;
+
   const { id: idParam } = await params;
   const id = parseId(idParam);
   if (id === null) {
     return Response.json({ error: "Invalid application id" }, { status: 400 });
   }
 
-  const application = getApplication(id);
+  // ids are sequential integers, so this endpoint is trivially enumerable. getApplication returns
+  // null for "belongs to someone else" exactly as it does for "does not exist", and the 404 below
+  // keeps those two indistinguishable -- otherwise the response itself confirms which ids are real.
+  const application = getApplication(id, auth.user.id);
   if (!application) {
     return Response.json({ error: `Application ${id} not found` }, { status: 404 });
   }
 
-  return Response.json({ application });
+  return Response.json({ application: toPublicApplication(application) });
 }
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireUser(request);
+  if (!auth.ok) return auth.response;
+
   const { id: idParam } = await params;
   const id = parseId(idParam);
   if (id === null) {
     return Response.json({ error: "Invalid application id" }, { status: 400 });
   }
 
-  const existing = getApplication(id);
+  const existing = getApplication(id, auth.user.id);
   if (!existing) {
     return Response.json({ error: `Application ${id} not found` }, { status: 404 });
   }
@@ -62,8 +77,8 @@ export async function PATCH(
   }
 
   try {
-    const application = updateApplication(id, patch);
-    return Response.json({ application });
+    const application = updateApplication(id, auth.user.id, patch);
+    return Response.json({ application: toPublicApplication(application) });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update application";
 

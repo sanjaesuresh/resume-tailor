@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { getApplication } from "@/lib/db";
+import { requireUser } from "@/lib/auth";
 import { DATA_DIR, RESUME_OWNER_NAME } from "@/lib/config";
 
 type FileKind = "pdf" | "tex";
@@ -35,9 +36,12 @@ export function downloadFilename(id: number, kind: FileKind): string {
  * corrupted row can be used to read files outside the data directory.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string; kind: string }> }
 ) {
+  const auth = await requireUser(request);
+  if (!auth.ok) return auth.response;
+
   const { id: idParam, kind: kindParam } = await params;
   const id = Number(idParam);
   if (!Number.isInteger(id)) {
@@ -48,7 +52,11 @@ export async function GET(
   }
   const kind = kindParam;
 
-  const application = getApplication(id);
+  // the ownership scope here is the ONLY thing preventing cross-tenant download: ids are
+  // sequential integers, so without it `for i in $(seq 1 500)` walks every user's resumes. The
+  // path containment check below is a traversal guard, not an authorization check -- it answers
+  // "is this inside data/", which stays true for everyone once directories are per-user.
+  const application = getApplication(id, auth.user.id);
   if (!application) {
     return Response.json({ error: `Application ${id} not found` }, { status: 404 });
   }
@@ -58,12 +66,14 @@ export async function GET(
     return Response.json({ error: `No ${kind} stored for this application` }, { status: 404 });
   }
 
-  // path-traversal guard: the resolved path must be DATA_DIR itself or a descendant of it
-  const resolvedDataDir = path.resolve(DATA_DIR);
+  // Containment is scoped to THIS user's directory, not to DATA_DIR: checking against DATA_DIR
+  // was fine when one person owned everything, but it is satisfied by every user's directory once
+  // artifacts are namespaced, so it would no longer catch a row whose stored path points into
+  // someone else's. Defence in depth behind the ownership check above -- it is what would still
+  // hold if a row were ever mis-assigned, restored from a stale backup, or hand-edited.
+  const resolvedUserDir = path.resolve(path.join(DATA_DIR, "applications", auth.user.id));
   const resolvedPath = path.resolve(storedPath);
-  const isInsideDataDir =
-    resolvedPath === resolvedDataDir || resolvedPath.startsWith(resolvedDataDir + path.sep);
-  if (!isInsideDataDir) {
+  if (!resolvedPath.startsWith(resolvedUserDir + path.sep)) {
     return Response.json({ error: "Invalid file path" }, { status: 400 });
   }
 

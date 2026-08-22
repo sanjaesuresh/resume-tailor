@@ -1,8 +1,15 @@
 import fs from "fs";
 import path from "path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/preview/route";
 import { ASSETS_DIR } from "@/lib/config";
+
+// stubbed so these tests exercise compilation, not sessions -- the real requireUser builds a
+// better-auth instance, which needs BETTER_AUTH_SECRET and opens the database. The route's
+// own auth gate is covered where it belongs, alongside the other access-control assertions.
+vi.mock("@/lib/auth", () => ({
+  requireUser: vi.fn(async () => ({ ok: true, user: { id: "u1", email: "a@b.c", name: null } })),
+}));
 
 // the committed sample (never the user's real, gitignored resume) -- same fixture the compile and
 // approve tests use, so these exercise the real tectonic binary rather than a mock

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import StatusSelect from "./components/StatusSelect";
 
 // shape of the parsed ats_report JSON column (lib/ats.ts's AtsReport); atsReport on an
@@ -30,8 +31,11 @@ interface Application {
   status: string;
   notes: string | null;
   atsReport: AtsReport | null;
-  texPath: string | null;
-  pdfPath: string | null;
+  // the API deliberately no longer sends the stored filesystem paths -- they disclosed the
+  // server's directory layout and, now that artifacts are namespaced, the owner's user id.
+  // These flags carry the only thing this table ever used them for.
+  hasTex: boolean;
+  hasPdf: boolean;
   appliedAt: string | null;
   createdAt: string;
 }
@@ -165,11 +169,18 @@ export default function Home() {
   // null = "not loaded yet" (loading state); [] = "loaded, zero rows" (empty state)
   const [applications, setApplications] = useState<Application[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const router = useRouter();
 
   const loadApplications = useCallback(async () => {
     setLoadError(null);
     try {
       const res = await fetch("/api/applications");
+      // an expired or missing session is not an error worth rendering -- without this it shows as
+      // "Failed to load applications (401)", which reads as a broken app rather than "sign in"
+      if (res.status === 401) {
+        router.push("/signin");
+        return;
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `Failed to load applications (${res.status})`);
@@ -179,7 +190,7 @@ export default function Home() {
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to load applications");
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     // fetch-on-mount to hydrate this client component from the applications API -- this is
@@ -298,9 +309,9 @@ export default function Home() {
                   </td>
                   <td>
                     <div className="tr-links">
-                      {app.pdfPath && <a href={`/api/files/${app.id}/pdf`}>PDF</a>}
-                      {app.texPath && <a href={`/api/files/${app.id}/tex`}>TeX</a>}
-                      {!app.pdfPath && !app.texPath && <span>—</span>}
+                      {app.hasPdf && <a href={`/api/files/${app.id}/pdf`}>PDF</a>}
+                      {app.hasTex && <a href={`/api/files/${app.id}/tex`}>TeX</a>}
+                      {!app.hasPdf && !app.hasTex && <span>—</span>}
                     </div>
                   </td>
                 </tr>

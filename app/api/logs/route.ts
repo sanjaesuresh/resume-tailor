@@ -1,4 +1,5 @@
 import { subscribe } from "@/lib/log";
+import { requireUser } from "@/lib/auth";
 
 // a long-lived stream, so it must never be statically rendered or cached
 export const dynamic = "force-dynamic";
@@ -14,8 +15,24 @@ const KEEPALIVE_MS = 30000;
  * Deliberately a side channel: /api/scrape, /api/tailor and /api/approve keep their exact
  * request/response contracts (and their 422/502 status codes), and neither they nor the tailoring
  * code know this exists.
+ *
+ * GATED TWICE, and it needs to be. lib/log.ts's subscriber registry is one process-wide Set with
+ * no per-user tagging, so a subscriber sees EVERY user's progress: the job URLs they scraped, the
+ * company and role they are applying to, their ATS scores, and the row ids of freshly saved
+ * applications (which are exactly the valid /api/files/<id> targets). There is no way to scope
+ * this stream per user without rebuilding the log sink, so it is restricted to a signed-in user on
+ * a development server instead. The env check alone would not be enough -- a container running
+ * `next dev` in production would sail straight through it.
  */
-export async function GET() {
+export async function GET(request: Request) {
+  if (process.env.NODE_ENV !== "development") {
+    // 404, not 403: in production this endpoint should not appear to exist at all
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const auth = await requireUser(request);
+  if (!auth.ok) return auth.response;
+
   const encoder = new TextEncoder();
 
   let unsubscribe: () => void = () => {};

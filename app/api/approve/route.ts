@@ -1,15 +1,13 @@
-import fs from "fs";
 import { z } from "zod";
 import { compileWithAutoFix, type FixFn } from "@/lib/compile";
 import { persistApplication, isValidReport, type PersistApplicationInput } from "@/lib/persist";
-import {
-  BASE_RESUME_PATH,
-  WHITELIST_PATH,
-  usingSampleResume,
-  usingSampleWhitelist,
-} from "@/lib/config";
+import { MAX_TEX_CHARS, usingSampleResume, usingSampleWhitelist } from "@/lib/config";
 import { formatCount, logger, startTimer, withHeartbeat } from "@/lib/log";
 import { getProvider, type ClaudeProvider } from "@/lib/provider";
+import { requireUser } from "@/lib/auth";
+import { toPublicApplication, type PublicApplication } from "@/lib/db";
+import { resolveTailorInputs } from "@/lib/tailor-inputs";
+import { checkRateLimit, recordUsage } from "@/lib/ratelimit";
 import { validateTailored, type Violation } from "@/lib/validator";
 
 // structured-output contract for the compile auto-fixer -- deliberately just `{ tex }`, distinct
@@ -35,17 +33,18 @@ export function createFixFn(provider: ClaudeProvider): FixFn {
   };
 }
 
-// mirrors lib/tailor.ts's parseWhitelist (that module isn't exported from and is out of scope for
-// this task) -- same markdown convention: a "# ..." header and a short prose blurb are dropped,
-// leaving one skill per line
-const WHITELIST_COMMENT_MAX_WORDS = 6;
-function parseWhitelist(markdown: string): string[] {
-  return markdown
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0) // blank lines
-    .filter((line) => !line.startsWith("#")) // markdown header
-    .filter((line) => line.split(/\s+/).length <= WHITELIST_COMMENT_MAX_WORDS); // intro prose
+/**
+ * The user's resume and whitelist for the re-validation pass. Falls back to an empty whitelist
+ * rather than throwing if they have no settings: an empty whitelist is the STRICT end of the
+ * guardrail (nothing new may be claimed), so a missing-settings edge case fails safe, and by this
+ * point the tailoring run has already succeeded, so refusing to save the result would be worse.
+ */
+function resolveForValidation(userId: string): { baseTex: string; whitelist: string[] } {
+  const resolved = resolveTailorInputs(userId);
+  if (resolved.ok) {
+    return { baseTex: resolved.inputs.baseTex, whitelist: resolved.inputs.whitelist };
+  }
+  return { baseTex: "", whitelist: [] };
 }
 
 export interface ApprovePayload {
@@ -68,7 +67,7 @@ export type ApproveResponse =
   | {
       status: 200;
       body: {
-        application: ReturnType<typeof persistApplication>;
+        application: PublicApplication;
         pdfUrl: string;
         usingSampleResume: boolean;
         usingSampleWhitelist: boolean;
@@ -95,7 +94,11 @@ export type ApproveResponse =
  * (persistApplication throwing) are left to propagate to the caller, distinct from the 422s this
  * function returns for compile/validation problems.
  */
-export async function approve(payload: ApprovePayload, deps: ApproveDeps = {}): Promise<ApproveResponse> {
+export async function approve(
+  userId: string,
+  payload: ApprovePayload,
+  deps: ApproveDeps = {}
+): Promise<ApproveResponse> {
   const { tex, company, role, url, report } = payload;
   const log = logger("approve");
   const elapsed = startTimer();
@@ -126,8 +129,13 @@ export async function approve(payload: ApprovePayload, deps: ApproveDeps = {}): 
   let finalReport: Record<string, unknown> = report;
 
   if (usedFix) {
-    const baseTex = deps.baseTex ?? fs.readFileSync(BASE_RESUME_PATH, "utf-8");
-    const whitelist = deps.whitelist ?? parseWhitelist(fs.readFileSync(WHITELIST_PATH, "utf-8"));
+    // the auto-fixer's output has to be re-checked against THIS user's resume and whitelist.
+    // Validating it against whichever files happened to be on the server's disk would produce
+    // violations describing a document nobody involved has ever seen.
+    const resolved = deps.baseTex
+      ? { baseTex: deps.baseTex, whitelist: deps.whitelist ?? [] }
+      : resolveForValidation(userId);
+    const { baseTex, whitelist } = resolved;
 
     // compare against the APPROVED draft's own violations (not an empty baseline): re-flagging an
     // issue the user already approved past would block an otherwise-good fix for no reason
@@ -175,13 +183,14 @@ export async function approve(payload: ApprovePayload, deps: ApproveDeps = {}): 
     dataDir: deps.dataDir,
     now: deps.now,
   };
-  const application = persistApplication(persistInput);
+  const application = persistApplication(userId, persistInput);
   log(`✓ saved #${application.id} · ${application.company} / ${application.role} · ${elapsed()} total`);
 
   return {
     status: 200,
     body: {
-      application,
+      // projected: the stored row carries absolute paths that now contain the owner's user id
+      application: toPublicApplication(application),
       pdfUrl: `/api/files/${application.id}/pdf`,
       usingSampleResume: usingSampleResume(),
       usingSampleWhitelist: usingSampleWhitelist(),
@@ -190,6 +199,20 @@ export async function approve(payload: ApprovePayload, deps: ApproveDeps = {}): 
 }
 
 export async function POST(request: Request) {
+  // deliberately outside the try: an auth failure is not a "failed to save" 500
+  const auth = await requireUser(request);
+  if (!auth.ok) return auth.response;
+
+  // compiling is CPU the whole box shares, and a failed compile can still trigger a model call
+  // for the auto-fix, so this is bounded on both counts
+  const limit = checkRateLimit(auth.user.id, "compile");
+  if (!limit.allowed) {
+    return Response.json(
+      { error: `Rate limit reached (${limit.limit} compiles). Try again shortly.` },
+      { status: 429, headers: { "retry-after": String(limit.retryAfterSeconds) } }
+    );
+  }
+
   try {
     const body = await request.json().catch(() => null);
     const tex = body?.tex;
@@ -200,6 +223,11 @@ export async function POST(request: Request) {
 
     if (typeof tex !== "string" || tex.trim().length === 0) {
       return Response.json({ error: "Missing tex" }, { status: 422 });
+    }
+    // an unbounded tex reaches writeFileSync in persist.ts, on the same volume that holds
+    // tracker.db -- a disk-fill here takes the database down with it
+    if (tex.length > MAX_TEX_CHARS) {
+      return Response.json({ error: "Document is too large to compile" }, { status: 413 });
     }
     if (typeof company !== "string" || company.trim().length === 0) {
       return Response.json({ error: "Missing company" }, { status: 422 });
@@ -213,7 +241,16 @@ export async function POST(request: Request) {
       return Response.json({ error: "Missing or invalid report" }, { status: 422 });
     }
 
-    const { status, body: responseBody } = await approve({ tex, company, role, url, report });
+    const { status, body: responseBody } = await approve(auth.user.id, {
+      tex,
+      company,
+      role,
+      url,
+      report,
+    });
+    // only a compile that actually ran counts against the allowance -- a 422 from a malformed
+    // payload should not cost the user anything
+    if (status === 200) recordUsage(auth.user.id, "compile");
     return Response.json(responseBody, { status });
   } catch (err) {
     // any throw past this point (persistApplication hitting a disk-full/locked-db/unwritable path,

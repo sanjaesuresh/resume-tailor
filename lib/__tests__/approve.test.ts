@@ -14,6 +14,10 @@ function tempDataDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "resume-tailor-persist-"));
 }
 
+// shaped like a real better-auth id (random alphanumerics), because persistApplication now
+// interpolates it into a filesystem path and asserts it matches /^[A-Za-z0-9_-]+$/
+const TEST_USER_ID = "usr7Fh2kQ9pLmXbN";
+
 // fixed local date (not UTC) so it matches persistApplication's local getFullYear/getMonth/getDate
 // components regardless of the machine's timezone
 const FIXED_DATE = new Date(2026, 0, 15);
@@ -30,7 +34,7 @@ describe("persistApplication", () => {
   it("builds a slug from company-role-yyyymmdd, lowercased with non-alphanumerics collapsed to hyphens", () => {
     dataDir = tempDataDir();
 
-    const application = persistApplication({
+    const application = persistApplication(TEST_USER_ID, {
       tex: "\\documentclass{article}",
       pdf: Buffer.from("%PDF-fake"),
       company: "Stripe",
@@ -43,17 +47,44 @@ describe("persistApplication", () => {
 
     const expectedSlug = "stripe-software-engineer-20260115";
     expect(application.texPath).toBe(
-      path.join(dataDir, "applications", expectedSlug, "resume.tex")
+      path.join(dataDir, "applications", TEST_USER_ID, expectedSlug, "resume.tex")
     );
     expect(application.pdfPath).toBe(
-      path.join(dataDir, "applications", expectedSlug, "resume.pdf")
+      path.join(dataDir, "applications", TEST_USER_ID, expectedSlug, "resume.pdf")
     );
+  });
+
+  it("falls back to a random suffix instead of scanning forever past the collision cap", () => {
+    // the suffix walk is O(n) in same-day duplicates, so it is capped; this covers the branch past
+    // the cap, which would otherwise be dead code until the day it ran in production
+    dataDir = tempDataDir();
+    const slugBase = "acme-engineer-20260115";
+    const userDir = path.join(dataDir, "applications", TEST_USER_ID);
+    fs.mkdirSync(userDir, { recursive: true });
+
+    // occupy the base slug and every numbered suffix the walk would try
+    fs.mkdirSync(path.join(userDir, slugBase));
+    for (let i = 2; i <= 100; i++) fs.mkdirSync(path.join(userDir, `${slugBase}-${i}`));
+
+    const application = persistApplication(TEST_USER_ID, {
+      tex: "\\documentclass{article}",
+      pdf: Buffer.from("%PDF-fake"),
+      company: "Acme",
+      role: "Engineer",
+      report: {},
+      dataDir,
+      now: FIXED_DATE,
+    });
+
+    const slug = path.basename(path.dirname(application.texPath!));
+    expect(slug).toMatch(new RegExp(`^${slugBase}-[0-9a-f]{12}$`));
+    expect(fs.existsSync(application.texPath!)).toBe(true);
   });
 
   it("appends -2 on a slug collision (same company/role/date persisted twice)", () => {
     dataDir = tempDataDir();
 
-    const first = persistApplication({
+    const first = persistApplication(TEST_USER_ID, {
       tex: "\\documentclass{article}",
       pdf: Buffer.from("%PDF-fake-1"),
       company: "Stripe",
@@ -64,7 +95,7 @@ describe("persistApplication", () => {
       now: FIXED_DATE,
     });
 
-    const second = persistApplication({
+    const second = persistApplication(TEST_USER_ID, {
       tex: "\\documentclass{article}",
       pdf: Buffer.from("%PDF-fake-2"),
       company: "Stripe",
@@ -90,7 +121,7 @@ describe("persistApplication", () => {
     const pdf = Buffer.from("%PDF-1.5 fake bytes");
     const report = { scoreBefore: 20, scoreAfter: 80, missing: ["kubernetes"] };
 
-    const application = persistApplication({
+    const application = persistApplication(TEST_USER_ID, {
       tex,
       pdf,
       company: "Acme Corp",
@@ -101,7 +132,7 @@ describe("persistApplication", () => {
       now: FIXED_DATE,
     });
 
-    const appDir = path.join(dataDir, "applications", "acme-corp-backend-engineer-20260115");
+    const appDir = path.join(dataDir, "applications", TEST_USER_ID, "acme-corp-backend-engineer-20260115");
     expect(fs.readFileSync(path.join(appDir, "resume.tex"), "utf-8")).toBe(tex);
     expect(fs.readFileSync(path.join(appDir, "resume.pdf"))).toEqual(pdf);
     expect(JSON.parse(fs.readFileSync(path.join(appDir, "report.json"), "utf-8"))).toEqual(report);
@@ -115,7 +146,7 @@ describe("persistApplication", () => {
 
     const report = { scoreBefore: 15, scoreAfter: 75, missing: ["go"] };
 
-    const application = persistApplication({
+    const application = persistApplication(TEST_USER_ID, {
       tex: "\\documentclass{article}",
       pdf: Buffer.from("%PDF-fake"),
       company: "Acme",
@@ -136,7 +167,7 @@ describe("persistApplication", () => {
   it("lowercases and collapses punctuation in company/role into a single-hyphen slug with no leading/trailing hyphens", () => {
     dataDir = tempDataDir();
 
-    const application = persistApplication({
+    const application = persistApplication(TEST_USER_ID, {
       tex: "\\documentclass{article}",
       pdf: Buffer.from("%PDF-fake"),
       company: "AT&T",
@@ -155,7 +186,7 @@ describe("persistApplication", () => {
   it("does not leave an orphaned slug directory or files when report is nullish -- defaults to null instead of throwing", () => {
     dataDir = tempDataDir();
 
-    const application = persistApplication({
+    const application = persistApplication(TEST_USER_ID, {
       tex: "\\documentclass{article}",
       pdf: Buffer.from("%PDF-fake"),
       company: "Acme",
@@ -166,7 +197,7 @@ describe("persistApplication", () => {
     });
 
     expect(application.atsReport).toBeNull();
-    const appDir = path.join(dataDir, "applications", "acme-engineer-20260115");
+    const appDir = path.join(dataDir, "applications", TEST_USER_ID, "acme-engineer-20260115");
     expect(
       JSON.parse(fs.readFileSync(path.join(appDir, "report.json"), "utf-8"))
     ).toBeNull();
@@ -181,7 +212,7 @@ describe("persistApplication", () => {
     circular.self = circular;
 
     expect(() =>
-      persistApplication({
+      persistApplication(TEST_USER_ID, {
         tex: "\\documentclass{article}",
         pdf: Buffer.from("%PDF-fake"),
         company: "Acme",
@@ -192,7 +223,7 @@ describe("persistApplication", () => {
       })
     ).toThrow();
 
-    const applicationsDir = path.join(dataDir, "applications");
+    const applicationsDir = path.join(dataDir, "applications", TEST_USER_ID);
     expect(fs.existsSync(applicationsDir) ? fs.readdirSync(applicationsDir) : []).toEqual([]);
   });
 
@@ -205,7 +236,7 @@ describe("persistApplication", () => {
     fs.mkdirSync(path.join(dataDir, "tracker.db"), { recursive: true });
 
     expect(() =>
-      persistApplication({
+      persistApplication(TEST_USER_ID, {
         tex: "\\documentclass{article}",
         pdf: Buffer.from("%PDF-fake"),
         company: "Acme",
@@ -216,7 +247,7 @@ describe("persistApplication", () => {
       })
     ).toThrow();
 
-    const applicationsDir = path.join(dataDir, "applications");
+    const applicationsDir = path.join(dataDir, "applications", TEST_USER_ID);
     expect(fs.readdirSync(applicationsDir)).toEqual([]);
   });
 });
@@ -266,6 +297,7 @@ describe("approve (B4: auto-fixed tex is re-validated, not trusted blindly)", ()
         // invoked on a first-try success, this would be the only place that could build a real
         // provider (and spawn the CLI) -- proving it's never reached is what proves the lazy fix
         const response = await approve(
+          TEST_USER_ID,
           { tex: validTex, company: "Acme", role: "Engineer", report: { scoreBefore: 10, scoreAfter: 50 } },
           { dataDir }
         );
@@ -306,6 +338,7 @@ describe("approve (B4: auto-fixed tex is re-validated, not trusted blindly)", ()
         const provider = fakeFixProvider(fixedTex);
 
         const response = await approve(
+          TEST_USER_ID,
           { tex: approvedTex, company: "Acme", role: "Engineer", report: { scoreBefore: 10, scoreAfter: 50 } },
           { provider, baseTex: validTex, whitelist: [], dataDir }
         );
@@ -320,7 +353,7 @@ describe("approve (B4: auto-fixed tex is re-validated, not trusted blindly)", ()
         }
 
         // the whole point: a rejected auto-fix must never reach disk
-        expect(fs.existsSync(path.join(dataDir, "applications"))).toBe(false);
+        expect(fs.existsSync(path.join(dataDir, "applications", TEST_USER_ID))).toBe(false);
       } finally {
         fs.rmSync(dataDir, { recursive: true, force: true });
       }
@@ -342,6 +375,7 @@ describe("approve (B4: auto-fixed tex is re-validated, not trusted blindly)", ()
         const provider = fakeFixProvider(validTex);
 
         const response = await approve(
+          TEST_USER_ID,
           { tex: approvedTex, company: "Acme", role: "Engineer", report: { scoreBefore: 10, scoreAfter: 50 } },
           { provider, baseTex: validTex, whitelist: [], dataDir }
         );
@@ -365,7 +399,7 @@ describe("persistApplication (H3: concurrent same-slug claims never delete each 
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "resume-tailor-persist-race-"));
     try {
       // first caller: succeeds normally, claims the base slug
-      const first = persistApplication({
+      const first = persistApplication(TEST_USER_ID, {
         tex: "\\documentclass{article}\\begin{document}first\\end{document}",
         pdf: Buffer.from("%PDF-first"),
         company: "Stripe",
@@ -385,7 +419,7 @@ describe("persistApplication (H3: concurrent same-slug claims never delete each 
       circular.self = circular;
 
       expect(() =>
-        persistApplication({
+        persistApplication(TEST_USER_ID, {
           tex: "\\documentclass{article}\\begin{document}second\\end{document}",
           pdf: Buffer.from("%PDF-second"),
           company: "Stripe",
@@ -403,7 +437,7 @@ describe("persistApplication (H3: concurrent same-slug claims never delete each 
       );
 
       // the second caller's own claimed directory (the "-2" suffix) is the one that got cleaned up
-      const applicationsDir = path.join(dataDir, "applications");
+      const applicationsDir = path.join(dataDir, "applications", TEST_USER_ID);
       const remaining = fs.readdirSync(applicationsDir);
       expect(remaining).toEqual([path.basename(firstAppDir)]);
     } finally {
