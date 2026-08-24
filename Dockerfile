@@ -102,11 +102,13 @@ COPY --from=builder --chown=app:app /app/public ./public
 # Defensive re-copy, see the top-of-file note: guarantees every platform prebuild ships
 # regardless of whether output-file-tracing followed better-sqlite3's dynamic require.
 COPY --from=builder --chown=app:app /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
+COPY --from=builder --chown=app:app /app/scripts/create-invite.mjs ./scripts/create-invite.mjs
 
 # DATA_DIR (lib/config.ts) resolves to <process.cwd()>/data, and process.cwd() for
 # `node server.js` in this layout is /app -- so the volume mounts here with no code change.
-# Created and chowned ahead of the volume mount so a fresh volume isn't root-owned when the
-# app user (below) tries to write tracker.db into it on first boot.
+# The image path is created and chowned for plain Docker bind mounts. Railway-managed
+# volumes are attached outside the Dockerfile and mounted as root-owned; set RAILWAY_RUN_UID=0
+# on Railway so the app can write tracker.db under /app/data.
 #
 # /home/app is (re-)chowned here too, as the very last root action before USER below, rather
 # than immediately after useradd creates it: on an emulated build host (confirmed on this
@@ -131,7 +133,6 @@ RUN printf '\\documentclass{article}\n\\begin{document}\nwarm\n\\end{document}\n
     && tectonic --outdir /tmp /tmp/warm.tex \
     && rm -f /tmp/warm.tex /tmp/warm.pdf
 
-VOLUME ["/app/data"]
 EXPOSE 3000
 
 # liveness only -- no dedicated health route exists (see docs/deployment.md); "/" always

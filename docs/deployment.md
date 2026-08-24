@@ -25,6 +25,7 @@ real values in a committed file.
 | `GEMINI_API_KEY` | yes | Gemini provider credential (`lib/config.ts`). Without it the app falls back to the local CLI provider, which does not exist in the container. |
 | `BETTER_AUTH_SECRET` | yes | Signs session tokens (`lib/auth.ts`). The app refuses to start auth without it rather than falling back to an insecure default. |
 | `BETTER_AUTH_URL` | yes | The real public URL of the deployment (e.g. `https://resume.example.com`). See section 6 -- getting this wrong breaks sign-in silently. |
+| `RAILWAY_RUN_UID` | Railway only | Set to `0` on Railway. Railway-managed volumes are mounted as root-owned, and the app writes SQLite/PDF data under `/app/data`. |
 | `LLM_PROVIDER` | no | Overrides provider auto-selection (`gemini`, `cli`, or `api`). Leave unset; the app selects `gemini` automatically when `GEMINI_API_KEY` is present. |
 | `GEMINI_MODEL` | no | Overrides the default Gemini model id (`lib/config.ts`). |
 | `RESUME_OWNER_NAME` | no | Fallback name used in generated filenames until the per-user display name (settings page) supersedes it. |
@@ -61,12 +62,17 @@ real values in a committed file.
 3. In the Railway dashboard, open the service, go to its **Volumes** tab, and attach a new
    volume mounted at `/app/data`. This is a dashboard action; there is no file in this repo
    to edit for it.
-4. In the service's **Variables** tab, add `GEMINI_API_KEY`, `BETTER_AUTH_SECRET`, and
+4. In the service's **Variables** tab, add `GEMINI_API_KEY`, `BETTER_AUTH_SECRET`,
    `BETTER_AUTH_URL` (use the Railway-generated public domain, or your custom domain once
-   step 5 below is done). Redeploy after adding variables so the running container picks
-   them up.
+   step 5 below is done), and `RAILWAY_RUN_UID=0`. Redeploy after adding variables so the
+   running container picks them up.
 5. Confirm the healthcheck (built into the `Dockerfile`) is passing in the deployment logs,
    then open the service's public URL.
+6. Mint the first invite code against the live volume from a Railway SSH session:
+   ```
+   railway ssh -- node scripts/create-invite.mjs you@example.com
+   ```
+   Use the printed code at `/signup`.
 
 ## 5. Custom domain
 
