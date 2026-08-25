@@ -50,51 +50,100 @@ interface UsageEventRow {
   created_at: string;
 }
 
+function windowRows(
+  userId: string,
+  kind: UsageKind,
+  now: Date,
+  windowSeconds: number
+): UsageEventRow[] {
+  const conn = getDb();
+  const windowStartIso = new Date(now.getTime() - windowSeconds * 1000).toISOString();
+
+  // oldest-first over the (user_id, kind, created_at) index: rows[0] (if any) is exactly the event
+  // whose aging-out determines retryAfterSeconds below.
+  return conn
+    .prepare(
+      "SELECT created_at FROM usage_events WHERE user_id = ? AND kind = ? AND created_at > ? ORDER BY created_at ASC"
+    )
+    .all(userId, kind, windowStartIso) as UsageEventRow[];
+}
+
+function buildRateLimitResult(
+  rows: UsageEventRow[],
+  limit: number,
+  windowSeconds: number,
+  now: Date,
+  allowed: boolean,
+  remaining: number
+): RateLimitResult {
+  let retryAfterSeconds = 0;
+  if (!allowed && rows[0]) {
+    const oldestAgesOutAt = new Date(rows[0].created_at).getTime() + windowSeconds * 1000;
+    retryAfterSeconds = Math.max(0, Math.ceil((oldestAgesOutAt - now.getTime()) / 1000));
+  }
+
+  return { allowed, limit, remaining: Math.max(0, remaining), retryAfterSeconds };
+}
+
+function pruneOldRows(now: Date): void {
+  const cutoffIso = new Date(now.getTime() - LONGEST_WINDOW_SECONDS * 1000).toISOString();
+  getDb().prepare("DELETE FROM usage_events WHERE created_at < ?").run(cutoffIso);
+}
+
 /**
  * Read-only: counts this user's events for `kind` in the trailing window ending at `now` and
- * reports whether another one is allowed. Does NOT insert a row -- callers must check first, do the
- * (possibly failing) work, and only call recordUsage() after it succeeds. That split is the whole
- * point of having two functions: a request that fails for an unrelated reason (a 422, a model
- * error, a rejected scrape target) must not consume the user's allowance just because it was
- * attempted.
+ * reports whether another one is allowed. Does NOT insert a row. Use reserveRateLimit() at the
+ * point a route is about to start expensive work; a separate read-only precheck cannot protect
+ * against concurrent bursts.
  *
  * `now` defaults to the real clock but is an explicit parameter so tests can drive it directly
  * instead of mocking Date.
  */
 export function checkRateLimit(userId: string, kind: UsageKind, now: Date = new Date()): RateLimitResult {
   const { limit, windowSeconds } = RATE_LIMITS[kind];
+  const rows = windowRows(userId, kind, now, windowSeconds);
+  return buildRateLimitResult(rows, limit, windowSeconds, now, rows.length < limit, limit - rows.length);
+}
+
+/**
+ * Atomically reserves one usage slot for `userId`/`kind` if a slot is still available. This is the
+ * function routes should call immediately before expensive work: the count and insert happen inside
+ * one BEGIN IMMEDIATE transaction, so concurrent requests cannot all pass the same stale precheck.
+ *
+ * A successful reservation is deliberately not rolled back when the guarded compile/model/fetch
+ * later fails. The resource was already spent by that point, and letting failures stay free makes a
+ * broken document or bad provider loop an unbounded CPU/API sink.
+ */
+export function reserveRateLimit(userId: string, kind: UsageKind, now: Date = new Date()): RateLimitResult {
+  const { limit, windowSeconds } = RATE_LIMITS[kind];
   const conn = getDb();
-  const windowStartIso = new Date(now.getTime() - windowSeconds * 1000).toISOString();
 
-  // oldest-first over the (user_id, kind, created_at) index: this is a single range scan, and
-  // rows[0] (if any) is exactly the event whose aging-out determines retryAfterSeconds below
-  const rows = conn
-    .prepare(
-      "SELECT created_at FROM usage_events WHERE user_id = ? AND kind = ? AND created_at > ? ORDER BY created_at ASC"
-    )
-    .all(userId, kind, windowStartIso) as UsageEventRow[];
+  const reserve = conn.transaction(() => {
+    const rows = windowRows(userId, kind, now, windowSeconds);
 
-  const count = rows.length;
-  // boundary choice: `limit` is the max number of events allowed inside the window, so being AT the
-  // limit (count === limit) refuses the next one -- consistent with remaining bottoming out at 0
-  // rather than going negative.
-  const allowed = count < limit;
-  const remaining = Math.max(0, limit - count);
+    // boundary choice: `limit` is the max number of events allowed inside the window, so being AT
+    // the limit refuses the next reservation.
+    if (rows.length >= limit) {
+      return buildRateLimitResult(rows, limit, windowSeconds, now, false, 0);
+    }
 
-  // only worth computing when refused; an allowed caller has no reason to wait
-  let retryAfterSeconds = 0;
-  if (!allowed) {
-    const oldestAgesOutAt = new Date(rows[0].created_at).getTime() + windowSeconds * 1000;
-    retryAfterSeconds = Math.max(0, Math.ceil((oldestAgesOutAt - now.getTime()) / 1000));
-  }
+    conn.prepare("INSERT INTO usage_events (user_id, kind, created_at) VALUES (?, ?, ?)").run(
+      userId,
+      kind,
+      now.toISOString()
+    );
+    pruneOldRows(now);
+    return buildRateLimitResult(rows, limit, windowSeconds, now, true, limit - rows.length - 1);
+  });
 
-  return { allowed, limit, remaining, retryAfterSeconds };
+  return reserve.immediate();
 }
 
 /**
  * Records one usage event for `userId`/`kind` at `now`, then prunes everything older than the
- * longest window. Call this only after the guarded work actually succeeded -- see checkRateLimit's
- * doc comment for why the two are split.
+ * longest window. Prefer reserveRateLimit() in routes that guard expensive work; this helper remains
+ * for tests and narrowly-scoped callers that intentionally account usage after an already-completed
+ * operation.
  *
  * The prune is unscoped by user/kind on purpose: the concern is total table growth ("grows forever
  * otherwise"), not any one caller's rows, and the longest-window cutoff is safe for every kind at
@@ -107,7 +156,5 @@ export function recordUsage(userId: string, kind: UsageKind, now: Date = new Dat
   const nowIso = now.toISOString();
 
   conn.prepare("INSERT INTO usage_events (user_id, kind, created_at) VALUES (?, ?, ?)").run(userId, kind, nowIso);
-
-  const cutoffIso = new Date(now.getTime() - LONGEST_WINDOW_SECONDS * 1000).toISOString();
-  conn.prepare("DELETE FROM usage_events WHERE created_at < ?").run(cutoffIso);
+  pruneOldRows(now);
 }

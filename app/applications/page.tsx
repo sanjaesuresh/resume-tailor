@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import StatusSelect from "../components/StatusSelect";
+import { AuthGateLoading, useRequireSession } from "@/app/components/useRequireSession";
 
 // shape of the parsed ats_report JSON column (lib/ats.ts's AtsReport); atsReport on an
 // application row is `unknown` server-side, so this is the client's best-effort contract.
@@ -242,6 +243,7 @@ function DeleteCell({
 }
 
 export default function Home() {
+  const { isAuthenticated } = useRequireSession();
   // null = "not loaded yet" (loading state); [] = "loaded, zero rows" (empty state)
   const [applications, setApplications] = useState<Application[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -269,13 +271,14 @@ export default function Home() {
   }, [router]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     // fetch-on-mount to hydrate this client component from the applications API -- this is
     // synchronizing with an external system (the network), the case react-hooks/set-state-in-effect
     // means to allow ("subscribe... calling setState... when external state changes"); the linter's
     // static analysis just can't see across loadApplications' async/await boundary to confirm that.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadApplications();
-  }, [loadApplications]);
+  }, [isAuthenticated, loadApplications]);
 
   // optimistic status update / revert lives here so the table is the single source of truth
   // that both StatusSelect (on change) and NotesCell (on save) write back into
@@ -301,6 +304,10 @@ export default function Home() {
   // defensively sort newest-first client-side too, rather than only trusting the API's
   // ORDER BY -- cheap, and keeps the contract true even if that query ever changes
   const sorted = applications ? [...applications].sort((a, b) => b.id - a.id) : null;
+
+  if (!isAuthenticated) {
+    return <AuthGateLoading heading="Applications" label="Checking session" />;
+  }
 
   return (
     <main className="tr-root">

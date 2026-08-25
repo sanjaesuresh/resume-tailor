@@ -103,6 +103,7 @@ COPY --from=builder --chown=app:app /app/public ./public
 # regardless of whether output-file-tracing followed better-sqlite3's dynamic require.
 COPY --from=builder --chown=app:app /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 COPY --from=builder --chown=app:app /app/scripts/create-invite.mjs ./scripts/create-invite.mjs
+COPY --from=builder --chown=app:app /app/scripts/claim-orphans.mjs ./scripts/claim-orphans.mjs
 
 # DATA_DIR (lib/config.ts) resolves to <process.cwd()>/data, and process.cwd() for
 # `node server.js` in this layout is /app -- so the volume mounts here with no code change.
@@ -135,10 +136,10 @@ RUN printf '\\documentclass{article}\n\\begin{document}\nwarm\n\\end{document}\n
 
 EXPOSE 3000
 
-# liveness only -- no dedicated health route exists (see docs/deployment.md); "/" always
-# answers (redirect or page) as long as the Next server itself is up, which is everything a
-# container orchestrator needs to decide whether to keep routing traffic here.
+# service health -- checks auth runtime config, SQLite write access on /app/data, and a cheap
+# tectonic availability probe. Railway also needs this path configured at the service level
+# (see docs/deployment.md) because it does not use Docker HEALTHCHECK for deploy readiness.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -fsS http://localhost:3000/ -o /dev/null || exit 1
+  CMD curl -fsS http://localhost:3000/api/health -o /dev/null || exit 1
 
 CMD ["node", "server.js"]

@@ -42,6 +42,7 @@ a persistent volume, on Railway or Fly.io.
 | `/applications` | The tracker: status, notes, ATS score, downloads, delete |
 | `/new` | The tailoring flow |
 | `/settings` | Resume, skills whitelist, tailoring prompt, name |
+| `/api/health` | Runtime healthcheck for deployments |
 
 ## Prerequisites
 
@@ -58,7 +59,7 @@ Set these in `.env.local` (never committed) or on whatever host runs the contain
 | Variable | Required | Purpose |
 |---|---|---|
 | `BETTER_AUTH_SECRET` | yes | Signs session tokens. Generate with `openssl rand -base64 32`. Auth refuses to start without it, deliberately -- the library would otherwise fall back to a well-known placeholder and every session would be forgeable. |
-| `BETTER_AUTH_URL` | yes | The public URL the app is actually reachable at (`http://localhost:3000` locally). Get it wrong and sign-in appears to succeed but does not stick. |
+| `BETTER_AUTH_URL` | yes in production | The public URL the app is actually reachable at (`http://localhost:3000` locally). Production fails closed if it is missing; development/test fall back to localhost. Get it wrong and sign-in appears to succeed but does not stick. |
 | `GEMINI_API_KEY` | to use Gemini | Provider credential. Its presence is also what selects Gemini by default. |
 | `LLM_PROVIDER` | no | Forces the provider: `gemini`, `cli`, or `api`. `CLAUDE_PROVIDER` is still read as the old name. |
 | `GEMINI_MODEL` | no | Overrides the model id. Must be a flash model on a free-tier key -- every pro model answers 429 there. |
@@ -96,7 +97,12 @@ node scripts/claim-orphans.ts you@example  # one-time, see below
 
 `claim-orphans` assigns applications that predate accounts to your account. It refuses once
 more than one account exists, because at that point nothing in the data says whose rows they
-were. Run it after signing up, before inviting anyone else.
+were. Run it after signing up, before inviting anyone else. In the deployed Docker image use
+the runtime script instead:
+
+```bash
+railway ssh -- node scripts/claim-orphans.mjs you@example
+```
 
 ## Data
 

@@ -5,8 +5,11 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { authClient } from "@/app/components/authClient";
 
-const LINKS = [
+const PUBLIC_LINKS = [
   { href: "/", label: "Home" },
+];
+
+const PROTECTED_LINKS = [
   { href: "/new", label: "New Application" },
   { href: "/applications", label: "Tracker" },
   { href: "/settings", label: "Settings" },
@@ -37,7 +40,7 @@ export default function SiteNav() {
   return (
     <header className="site-nav">
       <nav aria-label="Primary">
-        {LINKS.map((link) => {
+        {[...PUBLIC_LINKS, ...(session?.user ? PROTECTED_LINKS : [])].map((link) => {
           const current = pathname === link.href;
           return (
             <Link

@@ -24,7 +24,7 @@ real values in a committed file.
 |---|---|---|
 | `GEMINI_API_KEY` | yes | Gemini provider credential (`lib/config.ts`). Without it the app falls back to the local CLI provider, which does not exist in the container. |
 | `BETTER_AUTH_SECRET` | yes | Signs session tokens (`lib/auth.ts`). The app refuses to start auth without it rather than falling back to an insecure default. |
-| `BETTER_AUTH_URL` | yes | The real public URL of the deployment (e.g. `https://resume.example.com`). See section 6 -- getting this wrong breaks sign-in silently. |
+| `BETTER_AUTH_URL` | yes in production | The real public URL of the deployment (e.g. `https://resume.example.com`). See section 6 -- getting this wrong breaks sign-in silently. Development/test fall back to `http://localhost:3000`; production fails closed when it is missing. |
 | `RAILWAY_RUN_UID` | Railway only | Set to `0` on Railway. Railway-managed volumes are mounted as root-owned, and the app writes SQLite/PDF data under `/app/data`. |
 | `LLM_PROVIDER` | no | Overrides provider auto-selection (`gemini`, `cli`, or `api`). Leave unset; the app selects `gemini` automatically when `GEMINI_API_KEY` is present. |
 | `GEMINI_MODEL` | no | Overrides the default Gemini model id (`lib/config.ts`). |
@@ -66,13 +66,24 @@ real values in a committed file.
    `BETTER_AUTH_URL` (use the Railway-generated public domain, or your custom domain once
    step 5 below is done), and `RAILWAY_RUN_UID=0`. Redeploy after adding variables so the
    running container picks them up.
-5. Confirm the healthcheck (built into the `Dockerfile`) is passing in the deployment logs,
-   then open the service's public URL.
-6. Mint the first invite code against the live volume from a Railway SSH session:
+5. In the service's **Settings** tab, configure the deployment healthcheck path as
+   `/api/health`. Railway calls this path during deploy and waits for HTTP 200 before routing
+   traffic to the new deployment. The Dockerfile has the same path as its container
+   `HEALTHCHECK`, but Railway's deploy readiness uses the service setting.
+6. Confirm the healthcheck is passing in the deployment logs, then open the service's public
+   URL.
+7. Mint the first invite code against the live volume from a Railway SSH session:
    ```
    railway ssh -- node scripts/create-invite.mjs you@example.com
    ```
    Use the printed code at `/signup`.
+8. If this volume already had applications from the pre-auth single-user version, claim those
+   unowned rows after signing up and before inviting anyone else:
+   ```
+   railway ssh -- node scripts/claim-orphans.mjs you@example.com
+   ```
+   The script refuses once more than one account exists, because the old rows do not contain
+   enough data to prove which account should own them.
 
 ## 5. Custom domain
 
@@ -92,22 +103,37 @@ real values in a committed file.
 ## 6. Why `BETTER_AUTH_URL` must be the real public URL
 
 `better-auth` signs and validates session cookies against the `baseURL` it was configured
-with (`lib/auth.ts`). If `BETTER_AUTH_URL` is left unset, missing, or pointed at the wrong
-host (e.g. the platform's internal hostname, `http://localhost:3000`, or a domain that no
-longer matches after you add a custom one), sign-in and sign-up requests still return a
-success response -- but the session cookie better-auth issues does not match the URL the
-browser is actually on, so the browser either rejects it or the next request cannot
-validate it. The symptom is exactly "login appears to work, then the user is immediately
-signed out again" with no error in the UI. Whenever the public URL changes -- first deploy,
-adding a custom domain, moving platforms -- update `BETTER_AUTH_URL` and redeploy before
-testing sign-in.
+with (`lib/auth.ts`). If `BETTER_AUTH_URL` is pointed at the wrong host (e.g. the platform's
+internal hostname, `http://localhost:3000`, or a domain that no longer matches after you add
+a custom one), sign-in and sign-up requests still return a success response -- but the
+session cookie better-auth issues does not match the URL the browser is actually on, so the
+browser either rejects it or the next request cannot validate it. The symptom is exactly
+"login appears to work, then the user is immediately signed out again" with no error in the
+UI. Production now refuses to use the localhost fallback when `BETTER_AUTH_URL` is missing,
+and `/api/health` will return 503 until both `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are
+present. Whenever the public URL changes -- first deploy, adding a custom domain, moving
+platforms -- update `BETTER_AUTH_URL` and redeploy before testing sign-in.
 
-## 7. Backups
+## 7. Healthcheck
+
+`GET /api/health` is a service-readiness check, not a public diagnostics page. It returns
+HTTP 200 only when all of these cheap runtime checks pass:
+
+1. `BETTER_AUTH_SECRET` is set, and production has a real `BETTER_AUTH_URL`.
+2. The app can open the live SQLite database under `/app/data` and perform a rolled-back
+   write, which catches missing volume mounts and unwritable Railway volumes.
+3. `tectonic --version` can run within a short timeout.
+
+The Dockerfile uses this endpoint for its `HEALTHCHECK`. Railway also needs `/api/health`
+configured as the service healthcheck path, because Railway's deploy readiness check is a
+service setting rather than the Dockerfile's container health metadata.
+
+## 8. Backups
 
 The database (`data/tracker.db`) runs in WAL mode (`lib/db.ts`). This changes what "safe to
 copy" means and is the most important thing in this document.
 
-### 7.1 Why a plain `cp` is unsafe
+### 8.1 Why a plain `cp` is unsafe
 
 In WAL mode, recently committed writes can still live only in the `-wal` file next to the
 main database file, not yet folded ("checkpointed") into `tracker.db` itself. A plain
@@ -118,7 +144,7 @@ for this project: a main-file-only copy was missing an entire migration that had
 been applied and committed. Do not use `cp`, `scp`, `rsync` of the `.db` file alone, or any
 tool that copies it as a single file, for backups.
 
-### 7.2 The correct backup command
+### 8.2 The correct backup command
 
 The `sqlite3` CLI is installed in the runtime image specifically for this (the app itself
 only uses the `better-sqlite3` Node binding, never this CLI). Run it inside the running
@@ -137,7 +163,7 @@ to use. Schedule it (cron, a platform's scheduled job feature, or a manual habit
 risky operation) and copy the resulting file off the volume to separate storage -- a backup
 that lives on the same volume it is protecting does not survive that volume being lost.
 
-### 7.3 Volume snapshots
+### 8.3 Volume snapshots
 
 If your host platform offers block-level volume snapshots as an additional safety net, a
 snapshot is only a valid backup if it captures `tracker.db`, `tracker.db-wal`, and
@@ -147,7 +173,7 @@ different moments has the identical torn-copy problem as a plain `cp`. Prefer th
 `VACUUM INTO` method above as the primary backup; treat volume snapshots as a secondary,
 coarser safety net.
 
-### 7.4 Recovery
+### 8.4 Recovery
 
 There are no down migrations (`lib/migrate.ts`: migrations are forward-only by design).
 Recovery from a bad deploy, a bad migration, or data loss is **restore from the most recent

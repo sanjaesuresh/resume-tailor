@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { AuthGateLoading } from "@/app/components/useRequireSession";
+import { safeNextPath } from "@/app/components/authRedirect";
 import { authClient } from "@/app/components/authClient";
 
 type FieldErrors = { email?: string; password?: string };
@@ -22,6 +24,7 @@ function validatePassword(value: string): string | undefined {
 
 export default function SignInPage() {
   const router = useRouter();
+  const { data: session, isPending } = authClient.useSession();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -31,6 +34,16 @@ export default function SignInPage() {
 
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
+
+  const nextPath = useCallback((): string => {
+    return safeNextPath(new URLSearchParams(window.location.search).get("next"), window.location.origin);
+  }, []);
+
+  useEffect(() => {
+    if (!isPending && session?.user) {
+      router.replace(nextPath());
+    }
+  }, [isPending, nextPath, router, session?.user]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -59,7 +72,11 @@ export default function SignInPage() {
       return;
     }
 
-    router.push("/");
+    router.replace(nextPath());
+  }
+
+  if (isPending || session?.user) {
+    return <AuthGateLoading heading="Sign in" label="Checking session" />;
   }
 
   return (

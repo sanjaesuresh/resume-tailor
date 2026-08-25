@@ -7,7 +7,7 @@ import { getProvider, type ClaudeProvider } from "@/lib/provider";
 import { requireUser } from "@/lib/auth";
 import { toPublicApplication, type PublicApplication } from "@/lib/db";
 import { resolveTailorInputs } from "@/lib/tailor-inputs";
-import { checkRateLimit, recordUsage } from "@/lib/ratelimit";
+import { reserveRateLimit } from "@/lib/ratelimit";
 import { validateTailored, type Violation } from "@/lib/validator";
 
 // structured-output contract for the compile auto-fixer -- deliberately just `{ tex }`, distinct
@@ -203,16 +203,6 @@ export async function POST(request: Request) {
   const auth = await requireUser(request);
   if (!auth.ok) return auth.response;
 
-  // compiling is CPU the whole box shares, and a failed compile can still trigger a model call
-  // for the auto-fix, so this is bounded on both counts
-  const limit = checkRateLimit(auth.user.id, "compile");
-  if (!limit.allowed) {
-    return Response.json(
-      { error: `Rate limit reached (${limit.limit} compiles). Try again shortly.` },
-      { status: 429, headers: { "retry-after": String(limit.retryAfterSeconds) } }
-    );
-  }
-
   try {
     const body = await request.json().catch(() => null);
     const tex = body?.tex;
@@ -241,6 +231,16 @@ export async function POST(request: Request) {
       return Response.json({ error: "Missing or invalid report" }, { status: 422 });
     }
 
+    // compiling is CPU the whole box shares, and a failed compile can still trigger a model call
+    // for the auto-fix, so reserve after cheap payload validation but before compileWithAutoFix.
+    const limit = reserveRateLimit(auth.user.id, "compile");
+    if (!limit.allowed) {
+      return Response.json(
+        { error: `Rate limit reached (${limit.limit} compiles). Try again shortly.` },
+        { status: 429, headers: { "retry-after": String(limit.retryAfterSeconds) } }
+      );
+    }
+
     const { status, body: responseBody } = await approve(auth.user.id, {
       tex,
       company,
@@ -248,9 +248,6 @@ export async function POST(request: Request) {
       url,
       report,
     });
-    // only a compile that actually ran counts against the allowance -- a 422 from a malformed
-    // payload should not cost the user anything
-    if (status === 200) recordUsage(auth.user.id, "compile");
     return Response.json(responseBody, { status });
   } catch (err) {
     // any throw past this point (persistApplication hitting a disk-full/locked-db/unwritable path,

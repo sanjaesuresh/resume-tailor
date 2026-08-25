@@ -3,7 +3,7 @@ import { MAX_JOB_DESCRIPTION_CHARS } from "@/lib/config";
 import { activeProviderName } from "@/lib/provider";
 import { requireUser } from "@/lib/auth";
 import { resolveTailorInputs } from "@/lib/tailor-inputs";
-import { checkRateLimit, recordUsage } from "@/lib/ratelimit";
+import { reserveRateLimit } from "@/lib/ratelimit";
 
 // thin wrapper over tailorResume: maps the retry-loop result to JSON and turns any hard
 // provider failure (network, auth, every retry unparseable) into a 502 rather than
@@ -15,15 +15,6 @@ export async function POST(request: Request) {
   // whole document.
   const auth = await requireUser(request);
   if (!auth.ok) return auth.response;
-
-  // the most expensive thing a user can trigger: up to three model calls billed to the owner's key
-  const limit = checkRateLimit(auth.user.id, "tailor");
-  if (!limit.allowed) {
-    return Response.json(
-      { error: `Rate limit reached (${limit.limit} tailoring runs). Try again later.` },
-      { status: 429, headers: { "retry-after": String(limit.retryAfterSeconds) } }
-    );
-  }
 
   const body = await request.json().catch(() => null);
   const jobDescription = body?.jobDescription;
@@ -45,12 +36,19 @@ export async function POST(request: Request) {
   const feedback = typeof body?.feedback === "string" ? body.feedback : undefined;
   const previousTex = typeof body?.previousTex === "string" ? body.previousTex : undefined;
 
+  // the most expensive thing a user can trigger: up to three model calls billed to the owner's key.
+  // Reserve after cheap input/settings validation but before the provider call, so failed provider
+  // attempts still consume quota and concurrent bursts cannot all pass one stale precheck.
+  const limit = reserveRateLimit(auth.user.id, "tailor");
+  if (!limit.allowed) {
+    return Response.json(
+      { error: `Rate limit reached (${limit.limit} tailoring runs). Try again later.` },
+      { status: 429, headers: { "retry-after": String(limit.retryAfterSeconds) } }
+    );
+  }
+
   try {
     const result = await tailorResume(jobDescription, resolved.inputs, { feedback, previousTex });
-    // recorded only after the run actually succeeded, so a 422 or a provider outage does not
-    // silently eat the user's allowance
-    recordUsage(auth.user.id, "tailor");
-
     return Response.json({
       tex: result.tex,
       company: result.company,

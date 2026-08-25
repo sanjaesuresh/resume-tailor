@@ -2,7 +2,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { getUserSettings } from "@/lib/settings";
 import { getProvider } from "@/lib/provider";
-import { checkRateLimit, recordUsage } from "@/lib/ratelimit";
+import { reserveRateLimit } from "@/lib/ratelimit";
 import { formatCount, logger, startTimer, withHeartbeat } from "@/lib/log";
 import {
   isWhitelistBreadth,
@@ -39,16 +39,6 @@ export async function POST(request: Request) {
   const auth = await requireUser(request);
   if (!auth.ok) return auth.response;
 
-  // a model call billed to the owner's key, so it draws on the same budget as tailoring. It is a
-  // once-per-resume action, so sharing that allowance costs a real user nothing.
-  const limit = checkRateLimit(auth.user.id, "tailor");
-  if (!limit.allowed) {
-    return Response.json(
-      { error: `Rate limit reached. Try again later.` },
-      { status: 429, headers: { "retry-after": String(limit.retryAfterSeconds) } }
-    );
-  }
-
   const body = await request.json().catch(() => null);
   const rawBreadth = (body as { breadth?: unknown } | null)?.breadth;
   // default to the narrowest width: an absent or malformed value must never silently widen the
@@ -60,6 +50,17 @@ export async function POST(request: Request) {
     return Response.json(
       { error: "Save your resume first — the draft is extracted from it." },
       { status: 422 }
+    );
+  }
+
+  // a model call billed to the owner's key, so it draws on the same budget as tailoring. Reserve
+  // only after cheap request/settings validation but before calling the provider, including provider
+  // failures or unparseable responses in the budget.
+  const limit = reserveRateLimit(auth.user.id, "tailor");
+  if (!limit.allowed) {
+    return Response.json(
+      { error: `Rate limit reached. Try again later.` },
+      { status: 429, headers: { "retry-after": String(limit.retryAfterSeconds) } }
     );
   }
 
@@ -92,7 +93,6 @@ export async function POST(request: Request) {
     const present = cleanTerms(parsed.present, seen);
     const inferred = breadth === 1 ? [] : cleanTerms(parsed.inferred, seen);
 
-    recordUsage(auth.user.id, "tailor");
     log(`✓ ${present.length} in resume · ${inferred.length} inferred · ${elapsed()}`);
 
     // returned, never saved: the user reviews and edits before this becomes the guardrail they

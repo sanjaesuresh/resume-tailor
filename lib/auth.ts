@@ -43,7 +43,7 @@ function buildAuth(): { auth: ReturnType<typeof betterAuth>; options: BetterAuth
     // placeholder secret if none is set, which would make every session forgeable. Failing loudly
     // here matches how lib/config.ts treats a missing/invalid LLM_PROVIDER.
     secret: requireAuthSecret(),
-    baseURL: process.env.BETTER_AUTH_URL?.trim() || "http://localhost:3000",
+    baseURL: resolveAuthBaseURL(),
     // cookie attributes are deliberately left at better-auth's defaults: httpOnly true, sameSite
     // "lax", and "secure" auto-follows NODE_ENV/https -- exactly what's wanted, and hardcoding
     // secure:true here would silently break session cookies over plain http in local dev.
@@ -104,6 +104,24 @@ function requireAuthSecret(): string {
     );
   }
   return secret;
+}
+
+export function resolveAuthBaseURL(): string {
+  const baseURL = process.env.BETTER_AUTH_URL?.trim();
+  if (baseURL) return baseURL;
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "BETTER_AUTH_URL is not set -- set it to the public https:// URL of this deployment"
+    );
+  }
+
+  return "http://localhost:3000";
+}
+
+export function assertAuthRuntimeConfig(): { baseURL: string } {
+  requireAuthSecret();
+  return { baseURL: resolveAuthBaseURL() };
 }
 
 // better-auth owns the user/session/account/verification tables and creates them itself (this app's

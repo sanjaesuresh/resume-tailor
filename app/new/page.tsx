@@ -8,6 +8,7 @@ import type { TailorViolation } from "@/lib/tailor";
 import ReportCard from "@/app/components/ReportCard";
 import DiffView from "@/app/components/DiffView";
 import PdfPreview from "@/app/components/PdfPreview";
+import { AuthGateLoading, useRequireSession } from "@/app/components/useRequireSession";
 
 // ---- explicit state machine -------------------------------------------------
 // Each stage is its own object shape (a discriminated union keyed on `stage`) rather than one big
@@ -292,6 +293,7 @@ function isValidAtsReport(value: unknown): value is AtsReport {
 }
 
 export default function NewApplicationPage() {
+  const { isAuthenticated } = useRequireSession();
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [fieldErrors, setFieldErrors] = useState<{ company?: string; role?: string }>({});
   // B2 fabrication gate: explicit user acknowledgement required before Approve is allowed when
@@ -319,7 +321,7 @@ export default function NewApplicationPage() {
   // this exists to make the ~70s tailoring call legible while it runs, not to ship to users.
   // Failures are deliberately silent -- a missing log stream must never disturb the actual flow.
   useEffect(() => {
-    if (process.env.NODE_ENV !== "development") return;
+    if (!isAuthenticated || process.env.NODE_ENV !== "development") return;
 
     const source = new EventSource("/api/logs");
     source.onmessage = (event) => {
@@ -331,7 +333,7 @@ export default function NewApplicationPage() {
     };
 
     return () => source.close();
-  }, []);
+  }, [isAuthenticated]);
 
   // guards against setState-via-dispatch after unmount (e.g. user navigates to "/" mid-request) --
   // the fetch itself isn't cancelled, but its result is discarded rather than dispatched.
@@ -495,6 +497,10 @@ export default function NewApplicationPage() {
     (state.stage === "url" && state.scrapeLoading) ||
     (state.stage === "confirm" && state.tailorLoading) ||
     (state.stage === "review" && (state.tailorLoading || state.approveLoading));
+
+  if (!isAuthenticated) {
+    return <AuthGateLoading heading="New Application" label="Checking session" />;
+  }
 
   return (
     <main className="na-root">

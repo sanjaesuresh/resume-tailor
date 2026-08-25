@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { getDb } from "../db";
-import { checkRateLimit, recordUsage, RATE_LIMITS } from "../ratelimit";
+import { checkRateLimit, recordUsage, reserveRateLimit, RATE_LIMITS } from "../ratelimit";
 
 // each test gets its own temp-file db path so tests never share state or clobber the real tracker.db;
 // getDb(dbPath) re-points the module's memoized connection at that path for the duration of the test
@@ -141,6 +141,47 @@ describe("ratelimit", () => {
     const result = checkRateLimit("user-1", "tailor", BASE);
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(RATE_LIMITS.tailor.limit);
+  });
+
+  it("reserveRateLimit consumes allowance immediately and exhausts sequentially", () => {
+    const dbPath = tempDbPath();
+    dbDir = path.dirname(dbPath);
+    getDb(dbPath);
+
+    const limit = RATE_LIMITS.compile.limit;
+    for (let i = 0; i < limit; i++) {
+      const result = reserveRateLimit("user-1", "compile", BASE);
+      expect(result.allowed).toBe(true);
+      expect(result.remaining).toBe(limit - i - 1);
+    }
+
+    const refused = reserveRateLimit("user-1", "compile", BASE);
+    expect(refused.allowed).toBe(false);
+    expect(refused.remaining).toBe(0);
+
+    const conn = getDb();
+    const count = (conn.prepare("SELECT COUNT(*) n FROM usage_events").get() as { n: number }).n;
+    expect(count).toBe(limit);
+  });
+
+  it("atomic reservations allow only the window limit from a concurrent burst", async () => {
+    const dbPath = tempDbPath();
+    dbDir = path.dirname(dbPath);
+    getDb(dbPath);
+
+    const limit = RATE_LIMITS.scrape.limit;
+    const attempts = await Promise.all(
+      Array.from({ length: limit + 10 }, () =>
+        Promise.resolve().then(() => reserveRateLimit("user-1", "scrape", BASE))
+      )
+    );
+
+    expect(attempts.filter((result) => result.allowed)).toHaveLength(limit);
+    expect(attempts.filter((result) => !result.allowed)).toHaveLength(10);
+
+    const conn = getDb();
+    const count = (conn.prepare("SELECT COUNT(*) n FROM usage_events").get() as { n: number }).n;
+    expect(count).toBe(limit);
   });
 
   it("retryAfterSeconds reflects when the oldest event in the window ages out", () => {

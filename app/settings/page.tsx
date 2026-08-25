@@ -7,9 +7,11 @@ import SettingsResumeSection from "@/app/components/SettingsResumeSection";
 import SettingsWhitelistSection from "@/app/components/SettingsWhitelistSection";
 import SettingsPromptSection from "@/app/components/SettingsPromptSection";
 import SettingsDisplayNameSection from "@/app/components/SettingsDisplayNameSection";
+import { AuthGateLoading, useRequireSession } from "@/app/components/useRequireSession";
 import type { WhitelistBreadth } from "@/lib/prompts/whitelist";
 
 export default function SettingsPage() {
+  const { isAuthenticated } = useRequireSession();
   const router = useRouter();
   const mounted = useMountedRef();
 
@@ -55,11 +57,12 @@ export default function SettingsPage() {
   }, [goToSignIn, mounted]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     // fetch-on-mount to hydrate this client page -- same external-system-sync justification as
     // app/page.tsx's loadApplications effect
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadSettings();
-  }, [loadSettings]);
+  }, [isAuthenticated, loadSettings]);
 
   useEffect(() => {
     // seed the whitelist buffer exactly once, on first load -- never again, so a later settings
@@ -102,6 +105,10 @@ export default function SettingsPage() {
     } finally {
       if (mounted.current) setGeneratingWhitelist(false);
     }
+  }
+
+  if (!isAuthenticated) {
+    return <AuthGateLoading heading="Settings" label="Checking session" />;
   }
 
   return (
