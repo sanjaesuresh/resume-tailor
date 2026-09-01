@@ -21,6 +21,19 @@ function getOrigin(value: string): string | null {
   }
 }
 
+function getPublicRequestOrigin(request: Request): string {
+  const headers = request.headers;
+  const forwardedProto = headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedHost = headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwardedHost || headers.get("host")?.trim();
+
+  if (host) {
+    return `${forwardedProto || new URL(request.url).protocol.replace(":", "")}://${host}`;
+  }
+
+  return new URL(request.url).origin;
+}
+
 async function check(name: keyof HealthChecks, fn: () => void | Promise<void>): Promise<HealthCheck> {
   try {
     await fn();
@@ -92,7 +105,7 @@ export async function GET(request: Request): Promise<Response> {
   };
 
   const ok = Object.values(checks).every((result) => result.ok);
-  const requestOrigin = new URL(request.url).origin;
+  const requestOrigin = getPublicRequestOrigin(request);
   const configuredAuthOrigin = configuredAuthBaseURL ? getOrigin(configuredAuthBaseURL) : null;
 
   return Response.json(
