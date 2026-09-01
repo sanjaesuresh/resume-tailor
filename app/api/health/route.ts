@@ -13,6 +13,14 @@ interface HealthCheck {
 
 type HealthChecks = Record<"auth" | "sqlite" | "tectonic", HealthCheck>;
 
+function getOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
 async function check(name: keyof HealthChecks, fn: () => void | Promise<void>): Promise<HealthCheck> {
   try {
     await fn();
@@ -73,20 +81,29 @@ function checkTectonicAvailable(): Promise<void> {
   });
 }
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
+  let configuredAuthBaseURL: string | null = null;
   const checks: HealthChecks = {
     auth: await check("auth", () => {
-      assertAuthRuntimeConfig();
+      configuredAuthBaseURL = assertAuthRuntimeConfig().baseURL;
     }),
     sqlite: await check("sqlite", checkSqliteWritable),
     tectonic: await check("tectonic", checkTectonicAvailable),
   };
 
   const ok = Object.values(checks).every((result) => result.ok);
+  const requestOrigin = new URL(request.url).origin;
+  const configuredAuthOrigin = configuredAuthBaseURL ? getOrigin(configuredAuthBaseURL) : null;
+
   return Response.json(
     {
       status: ok ? "ok" : "error",
       dataDir: DATA_DIR,
+      auth: {
+        configuredBaseURL: configuredAuthBaseURL,
+        requestOrigin,
+        originMatchesRequest: configuredAuthOrigin === requestOrigin,
+      },
       checks,
     },
     {

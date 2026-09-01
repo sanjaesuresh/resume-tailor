@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 import { authClient } from "@/app/components/authClient";
 
 type FieldErrors = { inviteCode?: string; email?: string; password?: string };
+type SignUpError = {
+  message?: string;
+  code?: string;
+  status?: number;
+  statusText?: string;
+};
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // mirrors lib/auth.ts's better-auth config, which leaves minPasswordLength at the library default
@@ -28,6 +34,14 @@ function validatePassword(value: string): string | undefined {
   if (!value) return "Choose a password.";
   if (value.length < MIN_PASSWORD_LENGTH) return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
   return undefined;
+}
+
+function describeSignUpError(error: SignUpError): string {
+  if (error.message) return error.message;
+  if (error.code) return error.code.replaceAll("_", " ").toLowerCase();
+  if (error.statusText) return `Signup failed: ${error.statusText}`;
+  if (error.status) return `Signup failed with HTTP ${error.status}.`;
+  return "Could not create your account. Try again.";
 }
 
 export default function SignUpPage() {
@@ -87,7 +101,7 @@ export default function SignUpPage() {
       // server message is already the generic, non-leaking copy from lib/invites.ts
       // (inviteErrorMessage) or better-auth's own account-creation error -- never echoes the
       // invite code or password back
-      setServerError(error.message ?? "Could not create your account. Try again.");
+      setServerError(describeSignUpError(error));
       return;
     }
 
